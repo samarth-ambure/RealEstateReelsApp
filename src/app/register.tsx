@@ -13,24 +13,34 @@ import {
 
 import { useAuth } from '@/context/AuthContext';
 
-export default function LoginScreen() {
-  const { login } = useAuth();
+export default function RegisterScreen() {
+  const { register } = useAuth();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password.');
+  const handleRegister = async () => {
+    if (!name || !email || !password || !confirmPassword) {
+      Alert.alert('Error', 'Please fill all fields.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match.');
       return;
     }
 
     try {
-      await login(email, password);
-      router.replace('/home');
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unable to login.';
-      Alert.alert('Login Failed', message);
+      await register(name, email, password);
+      Alert.alert('Success', 'Registration successful!', [
+        {
+          text: 'OK',
+          onPress: () => router.replace('/home'),
+        },
+      ]);
+    } catch {
+      Alert.alert('Error', 'Unable to register. Please try again.');
     }
   };
 
@@ -39,8 +49,14 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.content}>
-        <Text style={styles.title}>RealEstate</Text>
-        <Text style={styles.subtitle}>Login to your account</Text>
+        <Text style={styles.title}>Create Account</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Full Name"
+          value={name}
+          onChangeText={setName}
+        />
 
         <TextInput
           style={styles.input}
@@ -59,12 +75,20 @@ export default function LoginScreen() {
           onChangeText={setPassword}
         />
 
-        <Pressable style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>Login</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Confirm Password"
+          secureTextEntry
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+        />
+
+        <Pressable style={styles.button} onPress={handleRegister}>
+          <Text style={styles.buttonText}>Register</Text>
         </Pressable>
 
-        <Pressable onPress={() => router.push('/register')}>
-          <Text style={styles.link}>Don&apos;t have an account? Register</Text>
+        <Pressable onPress={() => router.back()}>
+          <Text style={styles.link}>Already have an account? Login</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -82,15 +106,10 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    fontSize: 36,
+    fontSize: 32,
     fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#666',
     marginBottom: 30,
+    textAlign: 'center',
   },
   input: {
     borderWidth: 1,
