@@ -47,6 +47,13 @@ function RootNavigator() {
             headerShown: false,
           }}
         />
+
+        <Stack.Screen
+          name="property/[id]"
+          options={{
+            headerShown: false,
+          }}
+        />
       </Stack.Protected>
     </Stack>
   );
