@@ -153,6 +153,10 @@ export default function HomeScreen() {
     router.replace('/');
   };
 
+  const handleOpenProfile = () => {
+    router.push('/profile');
+  };
+
   const handleLike = useCallback((propertyId: string) => {
     setProperties((currentProperties) =>
       currentProperties.map((property) =>
@@ -271,9 +275,15 @@ export default function HomeScreen() {
           <Text style={styles.headerSubtitle}>Swipe for homes</Text>
         </View>
 
-        <Pressable style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.profileButton} onPress={handleOpenProfile}>
+            <Text style={styles.profileButtonText}>Profile</Text>
+          </Pressable>
+
+          <Pressable style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.searchPanel}>
@@ -475,6 +485,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileButton: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  profileButtonText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
   },
   logoutButton: {
     borderRadius: 999,
