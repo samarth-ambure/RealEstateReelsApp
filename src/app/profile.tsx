@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -11,10 +11,12 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
+import { mockProperties } from '@/data/properties';
 import {
   getPropertiesByUserEmail,
   getPropertiesByUserId,
 } from '@/database/propertyRepository';
+import { getUserById, UserRow } from '@/database/userRepository';
 import { Property } from '@/types/property';
 
 const DEFAULT_BIO = 'Real estate enthusiast';
@@ -42,42 +44,97 @@ function getUsername(email?: string) {
   return `@${emailName.toLowerCase().replace(/[^a-z0-9._-]/g, '')}`;
 }
 
+function firstParam(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export default function ProfileScreen() {
   const { logout, user } = useAuth();
-  const [userPosts, setUserPosts] = useState<Property[]>([]);
+  const params = useLocalSearchParams<{
+    userId?: string | string[];
+    displayName?: string | string[];
+    displayImage?: string | string[];
+  }>();
+  const requestedUserId = firstParam(params.userId);
+  const displayName = firstParam(params.displayName);
+  const displayImage = firstParam(params.displayImage);
+  const parsedUserId = requestedUserId ? Number(requestedUserId) : NaN;
+  const isOwnProfile =
+    (!requestedUserId && !displayName) ||
+    (Number.isFinite(parsedUserId) && user?.id === parsedUserId);
 
-  const loadUserPosts = useCallback(async () => {
-    if (!user) {
-      setUserPosts([]);
+  const [viewedUser, setViewedUser] = useState<UserRow | null>(null);
+  const [userPosts, setUserPosts] = useState<Property[]>([]);
+  const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
+
+  const loadProfile = useCallback(async () => {
+    setFailedAvatarUri(null);
+
+    if (isOwnProfile) {
+      if (!user) {
+        setViewedUser(null);
+        setUserPosts([]);
+        return;
+      }
+
+      try {
+        const posts = user.id
+          ? await getPropertiesByUserId(user.id)
+          : await getPropertiesByUserEmail(user.email);
+        setViewedUser(null);
+        setUserPosts(posts);
+      } catch {
+        setUserPosts([]);
+      }
       return;
     }
 
-    try {
-      const posts = user.id
-        ? await getPropertiesByUserId(user.id)
-        : await getPropertiesByUserEmail(user.email);
-      setUserPosts(posts);
-    } catch {
-      setUserPosts([]);
+    if (Number.isFinite(parsedUserId)) {
+      try {
+        const otherUser = await getUserById(parsedUserId);
+        setViewedUser(otherUser);
+        const posts = otherUser ? await getPropertiesByUserId(otherUser.id) : [];
+        setUserPosts(posts);
+      } catch {
+        setViewedUser(null);
+        setUserPosts([]);
+      }
+      return;
     }
-  }, [user]);
+
+    setViewedUser(null);
+    setUserPosts(
+      displayName
+        ? mockProperties.filter((property) => property.agentName === displayName)
+        : [],
+    );
+  }, [displayName, isOwnProfile, parsedUserId, user]);
 
   useFocusEffect(
     useCallback(() => {
-      loadUserPosts();
-    }, [loadUserPosts]),
+      loadProfile();
+    }, [loadProfile]),
   );
 
-  const profile = useMemo(
-    () => ({
-      name: user?.name || 'RealEstate User',
-      email: user?.email || 'No email available',
-      username: getUsername(user?.email),
-      bio: user?.bio || DEFAULT_BIO,
-      initials: getInitials(user?.name),
-    }),
-    [user],
-  );
+  const profile = useMemo(() => {
+    const name = isOwnProfile
+      ? user?.name || 'RealEstate User'
+      : viewedUser?.name || displayName || 'Creator';
+    const email = isOwnProfile ? user?.email || 'No email available' : viewedUser?.email;
+    const bio = isOwnProfile ? user?.bio || DEFAULT_BIO : viewedUser?.bio?.trim() || '';
+    const photoUri = isOwnProfile
+      ? user?.profileImage
+      : viewedUser?.profileImage || displayImage;
+
+    return {
+      name,
+      email,
+      username: email ? getUsername(email) : '',
+      bio,
+      initials: getInitials(name),
+      photoUri: photoUri?.trim() || '',
+    };
+  }, [displayImage, displayName, isOwnProfile, user, viewedUser]);
 
   const handleEditProfile = () => {
     Alert.alert('Edit Profile', 'Edit Profile feature will be available soon.');
@@ -114,44 +171,67 @@ export default function ProfileScreen() {
             <Text style={styles.backIcon}>‹</Text>
           </Pressable>
 
-          <Text style={styles.screenTitle}>Profile</Text>
+          <Text style={styles.screenTitle}>{isOwnProfile ? 'Profile' : 'Creator'}</Text>
 
-          <Pressable style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </Pressable>
+          {isOwnProfile ? (
+            <Pressable style={styles.logoutButton} onPress={handleLogout}>
+              <Text style={styles.logoutButtonText}>Logout</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.topBarSpacer} />
+          )}
         </View>
 
         <View style={styles.profileHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{profile.initials}</Text>
-          </View>
+          {profile.photoUri && failedAvatarUri !== profile.photoUri ? (
+            <Image
+              source={{ uri: profile.photoUri }}
+              style={styles.avatar}
+              resizeMode="cover"
+              onError={() => setFailedAvatarUri(profile.photoUri)}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{profile.initials}</Text>
+            </View>
+          )}
 
           <Text style={styles.name}>{profile.name}</Text>
-          <Text style={styles.username}>{profile.username}</Text>
-          <Text style={styles.email}>{profile.email}</Text>
-          <Text style={styles.bio}>{profile.bio}</Text>
+          {isOwnProfile ? (
+            <>
+              <Text style={styles.username}>{profile.username}</Text>
+              <Text style={styles.email}>{profile.email}</Text>
+            </>
+          ) : null}
+          {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
 
-          <View style={styles.actionRow}>
-            <Pressable style={styles.editButton} onPress={handleEditProfile}>
-              <Text style={styles.editButtonText}>Edit Profile</Text>
-            </Pressable>
+          {isOwnProfile ? (
+            <View style={styles.actionRow}>
+              <Pressable style={styles.editButton} onPress={handleEditProfile}>
+                <Text style={styles.editButtonText}>Edit Profile</Text>
+              </Pressable>
 
-            <Pressable style={styles.postButton} onPress={handleCreatePost}>
-              <Text style={styles.postButtonText}>+ Post</Text>
-            </Pressable>
-          </View>
+              <Pressable style={styles.postButton} onPress={handleCreatePost}>
+                <Text style={styles.postButtonText}>+ Post</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.statsRow}>
           <ProfileStat label="Posts" value={String(userPosts.length)} />
-          <ProfileStat label="Saved" value="0" />
-          <ProfileStat label="Likes" value="0" />
+          {isOwnProfile ? (
+            <>
+              <ProfileStat label="Saved" value="0" />
+              <ProfileStat label="Likes" value="0" />
+            </>
+          ) : null}
         </View>
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Posts</Text>
-            {userPosts.length > 0 ? (
+            <Text style={styles.sectionTitle}>{isOwnProfile ? 'Your Posts' : 'Properties'}</Text>
+            {isOwnProfile && userPosts.length > 0 ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Create another post"
@@ -192,11 +272,19 @@ export default function ProfileScreen() {
             </View>
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No posts yet</Text>
-              <Text style={styles.emptyText}>Create your first property post.</Text>
-              <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
-                <Text style={styles.emptyPostButtonText}>+ Post</Text>
-              </Pressable>
+              <Text style={styles.emptyTitle}>
+                {isOwnProfile ? 'No posts yet' : 'No properties yet'}
+              </Text>
+              <Text style={styles.emptyText}>
+                {isOwnProfile
+                  ? 'Create your first property post.'
+                  : 'This creator has not listed any properties.'}
+              </Text>
+              {isOwnProfile ? (
+                <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
+                  <Text style={styles.emptyPostButtonText}>+ Post</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
         </View>
@@ -257,6 +345,9 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 18,
     fontWeight: '800',
+  },
+  topBarSpacer: {
+    width: 72,
   },
   logoutButton: {
     borderRadius: 16,

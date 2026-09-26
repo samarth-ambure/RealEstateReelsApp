@@ -19,9 +19,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PropertyReelCard } from '@/components/PropertyReelCard';
-import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
 import { getAllProperties } from '@/database/propertyRepository';
+import { findUserByEmail } from '@/database/userRepository';
 import { Property } from '@/types/property';
 
 type BedroomFilter = 'Any' | '1' | '2' | '3' | '4+';
@@ -72,7 +72,6 @@ function matchesPriceFilter(property: Property, priceFilter: PriceFilter) {
 }
 
 export default function HomeScreen() {
-  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [properties, setProperties] = useState<Property[]>(mockProperties);
@@ -80,6 +79,7 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -252,9 +252,35 @@ export default function HomeScreen() {
     });
   }, []);
 
+  const handleOpenCreator = useCallback(async (property: Property) => {
+    if (property.createdBy) {
+      try {
+        const creator = await findUserByEmail(property.createdBy);
+        if (creator) {
+          router.push({
+            pathname: '/profile',
+            params: { userId: String(creator.id) },
+          });
+          return;
+        }
+      } catch {
+        // Fall through to display-only creator profile.
+      }
+    }
+
+    router.push({
+      pathname: '/profile',
+      params: {
+        displayName: property.agentName,
+        displayImage: property.agentImage,
+      },
+    });
+  }, []);
+
   const handleClearAll = useCallback(() => {
     setSearchQuery('');
     setFilters(DEFAULT_FILTERS);
+    setIsSearchExpanded(false);
   }, []);
 
   const bottomNavHeight = 64 + Math.max(insets.bottom, 12);
@@ -271,11 +297,13 @@ export default function HomeScreen() {
         onComment={handleComment}
         onShare={handleShare}
         onOpen={handleOpenProperty}
+        onOpenCreator={handleOpenCreator}
       />
     ),
     [
       handleComment,
       handleLike,
+      handleOpenCreator,
       handleOpenProperty,
       handleSave,
       handleShare,
@@ -293,10 +321,7 @@ export default function HomeScreen() {
     [height],
   );
 
-  const greeting = useMemo(
-    () => (user?.name ? `Hi, ${user.name}` : 'RealEstate Reels'),
-    [user?.name],
-  );
+  const isSearchOpen = isSearchExpanded || isSearchActive;
 
   return (
     <View style={styles.container}>
@@ -342,42 +367,62 @@ export default function HomeScreen() {
         </View>
       )}
 
-      <View style={[styles.topOverlay, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.headerTitle}>{greeting}</Text>
-        <Text style={styles.headerSubtitle}>Swipe for homes</Text>
-
+      <View
+        pointerEvents="box-none"
+        style={[styles.topOverlay, { paddingTop: insets.top + 4 }]}>
         <View style={styles.searchRow}>
-          <View style={styles.searchInputWrap}>
-            <AppIcon
-              ios="magnifyingglass"
-              android="search"
-              size={18}
-              color="#1e293b"
-              fallback="⌕"
-            />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search properties..."
-              placeholderTextColor="#94a3b8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-            />
-            {searchQuery ? (
+          {isSearchOpen ? (
+            <View style={styles.searchInputWrap}>
+              <AppIcon
+                ios="magnifyingglass"
+                android="search"
+                size={16}
+                color="#1e293b"
+                fallback="⌕"
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search..."
+                placeholderTextColor="#94a3b8"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoFocus
+              />
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Clear search"
+                accessibilityLabel="Close search"
                 style={styles.clearSearchButton}
-                onPress={() => setSearchQuery('')}>
+                onPress={() => {
+                  setSearchQuery('');
+                  setIsSearchExpanded(false);
+                }}>
                 <AppIcon ios="xmark" android="close" size={14} color="#334155" fallback="×" />
               </Pressable>
-            ) : null}
-          </View>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Search properties"
+              style={({ pressed }) => [styles.searchIconButton, pressed && styles.pressed]}
+              onPress={() => setIsSearchExpanded(true)}>
+              <AppIcon
+                ios="magnifyingglass"
+                android="search"
+                size={18}
+                color="#1e293b"
+                fallback="⌕"
+              />
+            </Pressable>
+          )}
 
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Filters"
             style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
             onPress={() => setIsFilterVisible(true)}>
-            <AppIcon ios="slider.horizontal.3" android="tune" size={18} color="#fff" fallback="☰" />
+            <AppIcon ios="slider.horizontal.3" android="tune" size={16} color="#fff" fallback="☰" />
+            <Text style={styles.filterButtonText}>Filter</Text>
             {activeFilterCount ? (
               <View style={styles.filterCount}>
                 <Text style={styles.filterCountText}>{activeFilterCount}</Text>
@@ -385,26 +430,6 @@ export default function HomeScreen() {
             ) : null}
           </Pressable>
         </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipScroller}>
-          {propertyTypeOptions.map((option) => (
-            <FilterChip
-              key={option}
-              label={option === 'All' ? 'All types' : option}
-              isSelected={filters.propertyType === option}
-              dark
-              onPress={() =>
-                setFilters((current) => ({
-                  ...current,
-                  propertyType: option,
-                }))
-              }
-            />
-          ))}
-        </ScrollView>
 
         {isFilteringActive ? (
           <View style={styles.resultRow}>
@@ -649,39 +674,39 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '800',
-    textShadowColor: 'rgba(0, 0, 0, 0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 6,
-  },
-  headerSubtitle: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: -4,
-    marginBottom: 4,
+    paddingHorizontal: 12,
+    gap: 6,
+    alignItems: 'flex-end',
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  searchIconButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   searchInputWrap: {
-    flex: 1,
-    minHeight: 48,
+    width: 176,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    paddingLeft: 16,
-    paddingRight: 8,
+    paddingLeft: 12,
+    paddingRight: 6,
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 12,
@@ -691,9 +716,9 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: '#0f172a',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   clearSearchButton: {
     width: 28,
@@ -704,17 +729,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#e2e8f0',
   },
   filterButton: {
-    width: 48,
-    height: 48,
+    minHeight: 44,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
+    gap: 6,
+    borderRadius: 22,
     backgroundColor: '#1e3a8a',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  filterButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   filterCount: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
     minWidth: 16,
     height: 16,
     borderRadius: 8,
@@ -728,11 +758,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-  chipScroller: {
-    gap: 8,
-    paddingVertical: 2,
-  },
   resultRow: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

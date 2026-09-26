@@ -14,6 +14,7 @@ type PropertyReelCardProps = {
   onComment: (property: Property) => void;
   onShare: (property: Property) => void;
   onOpen: (propertyId: string) => void;
+  onOpenCreator: (property: Property) => void;
 };
 
 export function PropertyReelCard({
@@ -25,9 +26,14 @@ export function PropertyReelCard({
   onComment,
   onShare,
   onOpen,
+  onOpenCreator,
 }: PropertyReelCardProps) {
   const [failedImageUri, setFailedImageUri] = useState<string | null>(null);
+  const [failedCreatorImageUri, setFailedCreatorImageUri] = useState<string | null>(null);
   const hasImageError = !property.image || failedImageUri === property.image;
+  const hasCreatorImageError =
+    !property.agentImage || failedCreatorImageUri === property.agentImage;
+  const creatorInitials = getCreatorInitials(property.agentName);
 
   const badgeLabel = property.propertyType?.trim() || 'For Sale';
 
@@ -53,12 +59,36 @@ export function PropertyReelCard({
         />
       )}
 
-      <View pointerEvents="none" style={styles.topScrim} />
       <View pointerEvents="none" style={styles.bottomScrim} />
       <View pointerEvents="none" style={styles.bottomFade} />
 
       <View style={[styles.content, { paddingBottom: Math.max(bottomInset, 24) }]}>
         <View style={styles.details}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${property.agentName}'s profile`}
+            style={({ pressed }) => [styles.creatorRow, pressed && styles.pressed]}
+            onPress={() => onOpenCreator(property)}>
+            {hasCreatorImageError ? (
+              <View style={styles.creatorAvatarFallback}>
+                <Text style={styles.creatorAvatarText}>{creatorInitials}</Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: property.agentImage }}
+                style={styles.creatorAvatar}
+                contentFit="cover"
+                onError={() => setFailedCreatorImageUri(property.agentImage)}
+              />
+            )}
+            <View style={styles.creatorText}>
+              <Text style={styles.creatorName} numberOfLines={1}>
+                {property.agentName}
+              </Text>
+              <Text style={styles.viewProfileText}>View profile</Text>
+            </View>
+          </Pressable>
+
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{badgeLabel}</Text>
           </View>
@@ -142,6 +172,19 @@ export function PropertyReelCard({
       </View>
     </View>
   );
+}
+
+function getCreatorInitials(name?: string) {
+  if (!name?.trim()) {
+    return 'RE';
+  }
+
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('');
 }
 
 function Stat({
@@ -252,14 +295,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  topScrim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 160,
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
-  },
   bottomScrim: {
     position: 'absolute',
     left: 0,
@@ -287,6 +322,50 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 8,
     paddingRight: 4,
+  },
+  creatorRow: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  creatorAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  creatorAvatarFallback: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+  },
+  creatorAvatarText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  creatorText: {
+    flexShrink: 1,
+  },
+  creatorName: {
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  viewProfileText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '600',
   },
   badge: {
     alignSelf: 'flex-start',
