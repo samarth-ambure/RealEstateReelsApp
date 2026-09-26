@@ -1,11 +1,14 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   ListRenderItem,
   Modal,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -13,10 +16,12 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PropertyReelCard } from '@/components/PropertyReelCard';
 import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
+import { getAllProperties } from '@/database/propertyRepository';
 import { Property } from '@/types/property';
 
 type BedroomFilter = 'Any' | '1' | '2' | '3' | '4+';
@@ -67,27 +72,77 @@ function matchesPriceFilter(property: Property, priceFilter: PriceFilter) {
 }
 
 export default function HomeScreen() {
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [properties, setProperties] = useState<Property[]>(mockProperties);
+  const [isFeedLoading, setIsFeedLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      void (async () => {
+        try {
+          const sqliteProperties = await getAllProperties();
+          if (!isActive) {
+            return;
+          }
+
+          setProperties((currentProperties) => {
+            const likedSavedById = new Map(
+              currentProperties.map((property) => [
+                property.id,
+                { isLiked: property.isLiked, isSaved: property.isSaved },
+              ]),
+            );
+            const sqliteIds = new Set(sqliteProperties.map((property) => property.id));
+            const uniqueMockProperties = mockProperties.filter(
+              (property) => !sqliteIds.has(property.id),
+            );
+            const combinedProperties = [...sqliteProperties, ...uniqueMockProperties];
+
+            return combinedProperties.map((property) => {
+              const previous = likedSavedById.get(property.id);
+              return previous
+                ? { ...property, isLiked: previous.isLiked, isSaved: previous.isSaved }
+                : property;
+            });
+          });
+        } catch {
+          if (isActive) {
+            setProperties(mockProperties);
+          }
+        } finally {
+          if (isActive) {
+            setIsFeedLoading(false);
+          }
+        }
+      })();
+
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
+
   const propertyTypeOptions = useMemo(
     () => [
       'All',
-      ...Array.from(new Set(mockProperties.map((property) => property.propertyType))),
+      ...Array.from(new Set(properties.map((property) => property.propertyType))),
     ],
-    [],
+    [properties],
   );
 
   const locationOptions = useMemo(
     () => [
       'All',
-      ...Array.from(new Set(mockProperties.map((property) => property.location))),
+      ...Array.from(new Set(properties.map((property) => property.location))),
     ],
-    [],
+    [properties],
   );
 
   const activeFilterCount = useMemo(
@@ -148,13 +203,12 @@ export default function HomeScreen() {
       ? '1 property found'
       : `${filteredProperties.length} properties found`;
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace('/');
-  };
-
   const handleOpenProfile = () => {
     router.push('/profile');
+  };
+
+  const handleOpenPost = () => {
+    router.push('/create-property');
   };
 
   const handleLike = useCallback((propertyId: string) => {
@@ -203,11 +257,15 @@ export default function HomeScreen() {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
+  const bottomNavHeight = 64 + Math.max(insets.bottom, 12);
+  const reelBottomInset = bottomNavHeight + 12;
+
   const renderProperty: ListRenderItem<Property> = useCallback(
     ({ item }) => (
       <PropertyReelCard
         property={item}
         height={height}
+        bottomInset={reelBottomInset}
         onLike={handleLike}
         onSave={handleSave}
         onComment={handleComment}
@@ -222,6 +280,7 @@ export default function HomeScreen() {
       handleSave,
       handleShare,
       height,
+      reelBottomInset,
     ],
   );
 
@@ -241,7 +300,12 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {filteredProperties.length > 0 ? (
+      {isFeedLoading ? (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#93c5fd" />
+          <Text style={styles.loadingText}>Loading homes</Text>
+        </View>
+      ) : filteredProperties.length > 0 ? (
         <FlatList
           data={filteredProperties}
           renderItem={renderProperty}
@@ -259,41 +323,42 @@ export default function HomeScreen() {
         />
       ) : (
         <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <AppIcon
+              ios="magnifyingglass"
+              android="search"
+              size={28}
+              color="#93c5fd"
+              fallback="⌕"
+            />
+          </View>
           <Text style={styles.emptyTitle}>No properties found</Text>
-          <Text style={styles.emptyText}>
-            Try a different search or clear the current filters.
-          </Text>
-          <Pressable style={styles.emptyButton} onPress={handleClearAll}>
-            <Text style={styles.emptyButtonText}>Clear All</Text>
+          <Text style={styles.emptyText}>Try changing your search or filters.</Text>
+          <Pressable
+            style={({ pressed }) => [styles.emptyButton, pressed && styles.pressed]}
+            onPress={handleClearAll}>
+            <Text style={styles.emptyButtonText}>Clear Filters</Text>
           </Pressable>
         </View>
       )}
 
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>{greeting}</Text>
-          <Text style={styles.headerSubtitle}>Swipe for homes</Text>
-        </View>
+      <View style={[styles.topOverlay, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.headerTitle}>{greeting}</Text>
+        <Text style={styles.headerSubtitle}>Swipe for homes</Text>
 
-        <View style={styles.headerActions}>
-          <Pressable style={styles.profileButton} onPress={handleOpenProfile}>
-            <Text style={styles.profileButtonText}>Profile</Text>
-          </Pressable>
-
-          <Pressable style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.searchPanel}>
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
-            <Text style={styles.searchIcon}>⌕</Text>
+            <AppIcon
+              ios="magnifyingglass"
+              android="search"
+              size={18}
+              color="#1e293b"
+              fallback="⌕"
+            />
             <TextInput
               style={styles.searchInput}
               placeholder="Search properties..."
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor="#94a3b8"
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoCapitalize="none"
@@ -304,28 +369,78 @@ export default function HomeScreen() {
                 accessibilityLabel="Clear search"
                 style={styles.clearSearchButton}
                 onPress={() => setSearchQuery('')}>
-                <Text style={styles.clearSearchText}>×</Text>
+                <AppIcon ios="xmark" android="close" size={14} color="#334155" fallback="×" />
               </Pressable>
             ) : null}
           </View>
 
           <Pressable
-            style={styles.filterButton}
+            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
             onPress={() => setIsFilterVisible(true)}>
-            <Text style={styles.filterButtonText}>
-              Filter{activeFilterCount ? ` ${activeFilterCount}` : ''}
-            </Text>
+            <AppIcon ios="slider.horizontal.3" android="tune" size={18} color="#fff" fallback="☰" />
+            {activeFilterCount ? (
+              <View style={styles.filterCount}>
+                <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipScroller}>
+          {propertyTypeOptions.map((option) => (
+            <FilterChip
+              key={option}
+              label={option === 'All' ? 'All types' : option}
+              isSelected={filters.propertyType === option}
+              dark
+              onPress={() =>
+                setFilters((current) => ({
+                  ...current,
+                  propertyType: option,
+                }))
+              }
+            />
+          ))}
+        </ScrollView>
 
         {isFilteringActive ? (
           <View style={styles.resultRow}>
             <Text style={styles.resultText}>{resultCountText}</Text>
-            <Pressable onPress={handleClearAll}>
+            <Pressable onPress={handleClearAll} style={({ pressed }) => pressed && styles.pressed}>
               <Text style={styles.clearAllText}>Clear All</Text>
             </Pressable>
           </View>
         ) : null}
+      </View>
+
+      <View style={[styles.bottomNavWrap, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.bottomNav}>
+          <NavItem
+            label="Home"
+            ios="house.fill"
+            android="home"
+            fallback="⌂"
+            isActive
+            onPress={() => undefined}
+          />
+          <NavItem
+            label="Post"
+            ios="plus.circle.fill"
+            android="add_circle"
+            fallback="＋"
+            onPress={handleOpenPost}
+          />
+          <NavItem
+            label="Profile"
+            ios="person.fill"
+            android="person"
+            fallback="👤"
+            onPress={handleOpenProfile}
+          />
+        </View>
       </View>
 
       <Modal
@@ -339,7 +454,8 @@ export default function HomeScreen() {
             onPress={() => setIsFilterVisible(false)}
           />
 
-          <View style={styles.filterSheet}>
+          <View style={[styles.filterSheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+            <View style={styles.filterHandle} />
             <View style={styles.filterHeader}>
               <Text style={styles.filterTitle}>Filters</Text>
               <Pressable onPress={() => setIsFilterVisible(false)}>
@@ -347,6 +463,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.filterSheetBody}>
             <FilterSection title="Property Type">
               {propertyTypeOptions.map((option) => (
                 <FilterChip
@@ -411,9 +528,14 @@ export default function HomeScreen() {
               ))}
             </FilterSection>
 
-            <Pressable style={styles.clearFiltersButton} onPress={handleClearAll}>
-              <Text style={styles.clearFiltersButtonText}>Clear All</Text>
-            </Pressable>
+            {isFilteringActive ? (
+              <Pressable
+                style={({ pressed }) => [styles.clearFiltersButton, pressed && styles.pressed]}
+                onPress={handleClearAll}>
+                <Text style={styles.clearFiltersButtonText}>Clear All</Text>
+              </Pressable>
+            ) : null}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -439,21 +561,81 @@ type FilterChipProps = {
   label: string;
   isSelected: boolean;
   onPress: () => void;
+  dark?: boolean;
 };
 
-function FilterChip({ label, isSelected, onPress }: FilterChipProps) {
+function FilterChip({ label, isSelected, onPress, dark = false }: FilterChipProps) {
   return (
     <Pressable
-      style={[styles.filterChip, isSelected && styles.selectedFilterChip]}
+      style={({ pressed }) => [
+        styles.filterChip,
+        dark && styles.filterChipDark,
+        isSelected && (dark ? styles.selectedFilterChipDark : styles.selectedFilterChip),
+        pressed && styles.pressed,
+      ]}
       onPress={onPress}>
       <Text
         style={[
           styles.filterChipText,
-          isSelected && styles.selectedFilterChipText,
+          dark && styles.filterChipTextDark,
+          isSelected &&
+            (dark ? styles.selectedFilterChipTextOnLight : styles.selectedFilterChipText),
         ]}>
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+function NavItem({
+  label,
+  ios,
+  android,
+  fallback,
+  isActive = false,
+  onPress,
+}: {
+  label: string;
+  ios: string;
+  android: string;
+  fallback: string;
+  isActive?: boolean;
+  onPress: () => void;
+}) {
+  const color = isActive ? '#1d4ed8' : '#64748b';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.navItem, pressed && styles.pressed]}
+      onPress={onPress}>
+      <AppIcon ios={ios} android={android} size={22} color={color} fallback={fallback} />
+      <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function AppIcon({
+  ios,
+  android,
+  size,
+  color,
+  fallback,
+}: {
+  ios: string;
+  android: string;
+  size: number;
+  color: string;
+  fallback: string;
+}) {
+  return (
+    <SymbolView
+      name={{ ios: ios as never, android: android as never, web: android as never }}
+      size={size}
+      tintColor={color}
+      fallback={<Text style={{ color, fontSize: size * 0.9, lineHeight: size }}>{fallback}</Text>}
+    />
   );
 }
 
@@ -462,63 +644,28 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  header: {
+  topOverlay: {
     position: 'absolute',
-    top: 54,
-    left: 18,
-    right: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    gap: 8,
   },
   headerTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '800',
-    textShadowColor: 'rgba(0, 0, 0, 0.55)',
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
   headerSubtitle: {
-    color: '#e5e7eb',
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 13,
     fontWeight: '600',
-    marginTop: 2,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  profileButton: {
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-  },
-  profileButtonText: {
-    color: '#111827',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  logoutButton: {
-    borderRadius: 999,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  logoutButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  searchPanel: {
-    position: 'absolute',
-    top: 106,
-    left: 18,
-    right: 18,
-    gap: 8,
+    marginTop: -4,
+    marginBottom: 4,
   },
   searchRow: {
     flexDirection: 'row',
@@ -530,104 +677,167 @@ const styles = StyleSheet.create({
     minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 18,
+    gap: 8,
+    borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    paddingLeft: 14,
+    paddingLeft: 16,
     paddingRight: 8,
-  },
-  searchIcon: {
-    color: '#111827',
-    fontSize: 19,
-    fontWeight: '800',
-    marginRight: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   searchInput: {
     flex: 1,
-    color: '#111827',
+    color: '#0f172a',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     paddingVertical: 12,
   },
   clearSearchButton: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 15,
-    backgroundColor: '#e5e7eb',
-  },
-  clearSearchText: {
-    color: '#111827',
-    fontSize: 21,
-    lineHeight: 23,
-    fontWeight: '800',
+    borderRadius: 14,
+    backgroundColor: '#e2e8f0',
   },
   filterButton: {
-    minHeight: 48,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
-    backgroundColor: '#111827',
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 24,
+    backgroundColor: '#1e3a8a',
   },
-  filterButtonText: {
+  filterCount: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 4,
+  },
+  filterCountText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: '800',
+  },
+  chipScroller: {
+    gap: 8,
+    paddingVertical: 2,
   },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderRadius: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 8,
   },
   resultText: {
     color: '#fff',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   clearAllText: {
-    color: '#fff',
+    color: '#bfdbfe',
     fontSize: 13,
     fontWeight: '800',
-    textDecorationLine: 'underline',
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0b1220',
+    gap: 16,
+  },
+  loadingText: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 15,
+    fontWeight: '600',
   },
   emptyState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111827',
-    paddingHorizontal: 28,
+    backgroundColor: '#0b1220',
+    paddingHorizontal: 32,
+  },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(147, 197, 253, 0.14)',
+    marginBottom: 16,
   },
   emptyTitle: {
     color: '#fff',
-    fontSize: 25,
+    fontSize: 24,
     fontWeight: '800',
     textAlign: 'center',
   },
   emptyText: {
-    color: '#d1d5db',
+    color: '#94a3b8',
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   emptyButton: {
-    borderRadius: 16,
+    borderRadius: 999,
     backgroundColor: '#fff',
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
     paddingVertical: 12,
     marginTop: 20,
   },
   emptyButtonText: {
-    color: '#111827',
+    color: '#0f172a',
     fontSize: 14,
     fontWeight: '800',
+  },
+  bottomNavWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 0,
+  },
+  bottomNav: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    paddingHorizontal: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+  },
+  navLabel: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  navLabelActive: {
+    color: '#1d4ed8',
   },
   modalOverlay: {
     flex: 1,
@@ -642,26 +852,37 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   filterSheet: {
+    maxHeight: '86%',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    backgroundColor: '#f6f7f9',
+    backgroundColor: '#f8fafc',
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 30,
+    paddingTop: 12,
+  },
+  filterSheetBody: {
+    maxHeight: 520,
+  },
+  filterHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#cbd5e1',
+    marginBottom: 12,
   },
   filterHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   filterTitle: {
-    color: '#111827',
-    fontSize: 24,
+    color: '#0f172a',
+    fontSize: 22,
     fontWeight: '800',
   },
   closeFilterText: {
-    color: '#111827',
+    color: '#1d4ed8',
     fontSize: 15,
     fontWeight: '800',
   },
@@ -669,46 +890,65 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   filterSectionTitle: {
-    color: '#374151',
-    fontSize: 14,
+    color: '#475569',
+    fontSize: 13,
     fontWeight: '800',
     marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   filterChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 9,
+    gap: 8,
   },
   filterChip: {
     borderRadius: 999,
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  filterChipDark: {
+    backgroundColor: 'rgba(15, 23, 42, 0.42)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
   },
   selectedFilterChip: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: '#1e3a8a',
+    borderColor: '#1e3a8a',
+  },
+  selectedFilterChipDark: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
   },
   filterChipText: {
-    color: '#111827',
+    color: '#0f172a',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
+  },
+  filterChipTextDark: {
+    color: '#fff',
   },
   selectedFilterChipText: {
     color: '#fff',
   },
+  selectedFilterChipTextOnLight: {
+    color: '#0f172a',
+  },
   clearFiltersButton: {
     alignItems: 'center',
     borderRadius: 18,
-    backgroundColor: '#111827',
-    paddingVertical: 15,
+    backgroundColor: '#0f172a',
+    paddingVertical: 14,
     marginTop: 22,
   },
   clearFiltersButtonText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+  pressed: {
+    opacity: 0.82,
   },
 });
