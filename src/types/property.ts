@@ -13,4 +13,5 @@ export type Property = {
   agentImage: string;
   isLiked: boolean;
   isSaved: boolean;
+  createdBy?: string;
 };

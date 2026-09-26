@@ -1,7 +1,8 @@
-import { router } from 'expo-router';
-import { useMemo } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,11 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
+import {
+  getPropertiesByUserEmail,
+  getPropertiesByUserId,
+} from '@/database/propertyRepository';
+import { Property } from '@/types/property';
 
 const DEFAULT_BIO = 'Real estate enthusiast';
 
@@ -38,16 +44,39 @@ function getUsername(email?: string) {
 
 export default function ProfileScreen() {
   const { logout, user } = useAuth();
+  const [userPosts, setUserPosts] = useState<Property[]>([]);
+
+  const loadUserPosts = useCallback(async () => {
+    if (!user) {
+      setUserPosts([]);
+      return;
+    }
+
+    try {
+      const posts = user.id
+        ? await getPropertiesByUserId(user.id)
+        : await getPropertiesByUserEmail(user.email);
+      setUserPosts(posts);
+    } catch {
+      setUserPosts([]);
+    }
+  }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUserPosts();
+    }, [loadUserPosts]),
+  );
 
   const profile = useMemo(
     () => ({
       name: user?.name || 'RealEstate User',
       email: user?.email || 'No email available',
       username: getUsername(user?.email),
-      bio: DEFAULT_BIO,
+      bio: user?.bio || DEFAULT_BIO,
       initials: getInitials(user?.name),
     }),
-    [user?.email, user?.name],
+    [user],
   );
 
   const handleEditProfile = () => {
@@ -55,7 +84,14 @@ export default function ProfileScreen() {
   };
 
   const handleCreatePost = () => {
-    Alert.alert('Post', 'Post feature will be available soon.');
+    router.push('/create-property');
+  };
+
+  const handleOpenProperty = (propertyId: string) => {
+    router.push({
+      pathname: '/property/[id]',
+      params: { id: propertyId },
+    });
   };
 
   const handleLogout = async () => {
@@ -107,21 +143,62 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.statsRow}>
-          <ProfileStat label="Posts" value="0" />
+          <ProfileStat label="Posts" value={String(userPosts.length)} />
           <ProfileStat label="Saved" value="0" />
           <ProfileStat label="Likes" value="0" />
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Posts</Text>
-
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No posts yet</Text>
-            <Text style={styles.emptyText}>Create your first property post.</Text>
-            <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
-              <Text style={styles.emptyPostButtonText}>+ Post</Text>
-            </Pressable>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your Posts</Text>
+            {userPosts.length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Create another post"
+                style={styles.sectionPostButton}
+                onPress={handleCreatePost}>
+                <Text style={styles.sectionPostButtonText}>+ Post</Text>
+              </Pressable>
+            ) : null}
           </View>
+
+          {userPosts.length > 0 ? (
+            <View style={styles.postsList}>
+              {userPosts.map((post) => (
+                <Pressable
+                  key={post.id}
+                  style={styles.postCard}
+                  onPress={() => handleOpenProperty(post.id)}>
+                  <Image source={{ uri: post.image }} style={styles.postThumbnail} />
+                  <View style={styles.postDetails}>
+                    <Text style={styles.postPrice}>{post.price}</Text>
+                    <Text style={styles.postTitle} numberOfLines={1}>
+                      {post.title}
+                    </Text>
+                    <Text style={styles.postLocation} numberOfLines={1}>
+                      📍 {post.location}
+                    </Text>
+                    <View style={styles.postMetaRow}>
+                      <Text style={styles.postMetaBadge}>{post.propertyType}</Text>
+                      <Text style={styles.postMetaBadge}>
+                        {post.bedrooms} bd • {post.bathrooms} ba
+                      </Text>
+                      <Text style={styles.postMetaBadge}>{post.area}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.postChevron}>›</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No posts yet</Text>
+              <Text style={styles.emptyText}>Create your first property post.</Text>
+              <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
+                <Text style={styles.emptyPostButtonText}>+ Post</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -303,11 +380,89 @@ const styles = StyleSheet.create({
   section: {
     marginTop: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   sectionTitle: {
     color: '#111827',
     fontSize: 21,
     fontWeight: '900',
-    marginBottom: 12,
+  },
+  sectionPostButton: {
+    borderRadius: 12,
+    backgroundColor: '#111827',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  sectionPostButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  postsList: {
+    gap: 12,
+  },
+  postCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#edf0f4',
+    gap: 12,
+  },
+  postThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 14,
+    backgroundColor: '#e5e7eb',
+  },
+  postDetails: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  postPrice: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  postTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  postLocation: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  postMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  postMetaBadge: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    color: '#4b5563',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  postChevron: {
+    color: '#9ca3af',
+    fontSize: 24,
+    lineHeight: 26,
+    fontWeight: '600',
+    paddingRight: 4,
   },
   emptyState: {
     alignItems: 'center',

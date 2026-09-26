@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   PropsWithChildren,
@@ -8,17 +7,25 @@ import {
   useState,
 } from 'react';
 
-const LOCAL_USER_KEY = 'localUser';
+import { initDatabase } from '@/database/database';
+import { migrateFromAsyncStorage } from '@/database/migration';
+import {
+  clearActiveSession,
+  createUser,
+  findUserByEmail,
+  findUserForAuth,
+  getActiveSessionUser,
+  setActiveSession,
+  UserRow,
+} from '@/database/userRepository';
 
-type StoredUser = {
+export type AuthUser = {
+  id: number;
   name: string;
   email: string;
-  password: string;
-};
-
-type AuthUser = {
-  name: string;
-  email: string;
+  bio?: string | null;
+  profileImage?: string | null;
+  createdAt?: string;
 };
 
 type AuthContextValue = {
@@ -32,40 +39,15 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function isStoredUser(value: unknown): value is StoredUser {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const user = value as Partial<StoredUser>;
-
-  return (
-    typeof user.name === 'string' &&
-    typeof user.email === 'string' &&
-    typeof user.password === 'string'
-  );
-}
-
-function toAuthUser(user: StoredUser): AuthUser {
+function toAuthUser(row: UserRow): AuthUser {
   return {
-    name: user.name,
-    email: user.email,
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    bio: row.bio,
+    profileImage: row.profileImage,
+    createdAt: row.createdAt,
   };
-}
-
-async function getStoredUser(): Promise<StoredUser | null> {
-  const savedUser = await AsyncStorage.getItem(LOCAL_USER_KEY);
-
-  if (!savedUser) {
-    return null;
-  }
-
-  try {
-    const parsedUser = JSON.parse(savedUser);
-    return isStoredUser(parsedUser) ? parsedUser : null;
-  } catch {
-    return null;
-  }
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -75,13 +57,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let isMounted = true;
 
-    const loadUser = async () => {
+    const bootstrapAuth = async () => {
       try {
-        const storedUser = await getStoredUser();
+        await initDatabase();
+        await migrateFromAsyncStorage();
 
-        if (isMounted && storedUser) {
-          setUser(toAuthUser(storedUser));
+        const activeUser = await getActiveSessionUser();
+        if (isMounted && activeUser) {
+          setUser(toAuthUser(activeUser));
         }
+      } catch (err) {
+        console.warn('Error during auth initialization:', err);
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -89,7 +75,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     };
 
-    loadUser();
+    bootstrapAuth();
 
     return () => {
       isMounted = false;
@@ -97,32 +83,33 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const storedUser = await getStoredUser();
+    const userRow = await findUserForAuth(email, password);
 
-    if (!storedUser) {
-      throw new Error('No registered user found.');
-    }
-
-    if (storedUser.email !== email || storedUser.password !== password) {
+    if (!userRow) {
+      const existingUser = await findUserByEmail(email);
+      if (!existingUser) {
+        throw new Error('No registered user found.');
+      }
       throw new Error('Invalid email or password.');
     }
 
-    setUser(toAuthUser(storedUser));
+    await setActiveSession(userRow.id);
+    setUser(toAuthUser(userRow));
   };
 
   const register = async (name: string, email: string, password: string) => {
-    const newUser: StoredUser = {
+    const createdUser = await createUser({
       name,
       email,
       password,
-    };
+    });
 
-    await AsyncStorage.setItem(LOCAL_USER_KEY, JSON.stringify(newUser));
-    setUser(toAuthUser(newUser));
+    await setActiveSession(createdUser.id);
+    setUser(toAuthUser(createdUser));
   };
 
   const logout = async () => {
-    await AsyncStorage.removeItem(LOCAL_USER_KEY);
+    await clearActiveSession();
     setUser(null);
   };
 

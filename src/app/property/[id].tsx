@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -11,16 +12,58 @@ import {
 } from 'react-native';
 
 import { mockProperties } from '@/data/properties';
+import { getPropertyById } from '@/database/propertyRepository';
+import { Property } from '@/types/property';
 
 export default function PropertyDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const propertyId = Array.isArray(id) ? id[0] : id;
-  const property = useMemo(
-    () => mockProperties.find((item) => item.id === propertyId),
+
+  const mockProperty = useMemo(
+    () => mockProperties.find((item) => item.id === propertyId) ?? null,
     [propertyId],
   );
-  const [isLiked, setIsLiked] = useState(property?.isLiked ?? false);
-  const [isSaved, setIsSaved] = useState(property?.isSaved ?? false);
+
+  const [userProperty, setUserProperty] = useState<Property | null>(null);
+  const [isLoadingUserProperty, setIsLoadingUserProperty] = useState(!mockProperty);
+
+  const property = mockProperty ?? userProperty;
+
+  const [hasLiked, setHasLiked] = useState<boolean | null>(null);
+  const [hasSaved, setHasSaved] = useState<boolean | null>(null);
+
+  const isLiked = hasLiked ?? property?.isLiked ?? false;
+  const isSaved = hasSaved ?? property?.isSaved ?? false;
+
+  useEffect(() => {
+    if (mockProperty) {
+      return;
+    }
+
+    let isMounted = true;
+    const fetchProperty = async () => {
+      try {
+        const found = await getPropertyById(propertyId ?? '');
+        if (isMounted) {
+          setUserProperty(found);
+        }
+      } catch {
+        if (isMounted) {
+          setUserProperty(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingUserProperty(false);
+        }
+      }
+    };
+
+    fetchProperty();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mockProperty, propertyId]);
 
   const handleContactAgent = () => {
     Alert.alert(
@@ -28,6 +71,22 @@ export default function PropertyDetailsScreen() {
       'Contact Agent functionality will be available soon.',
     );
   };
+
+  const handleToggleLike = () => {
+    setHasLiked(!isLiked);
+  };
+
+  const handleToggleSave = () => {
+    setHasSaved(!isSaved);
+  };
+
+  if (isLoadingUserProperty) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#111827" />
+      </View>
+    );
+  }
 
   if (!property) {
     return (
@@ -72,7 +131,7 @@ export default function PropertyDetailsScreen() {
           <View style={styles.actionRow}>
             <Pressable
               style={[styles.secondaryButton, isLiked && styles.activeButton]}
-              onPress={() => setIsLiked((current) => !current)}>
+              onPress={handleToggleLike}>
               <Text
                 style={[
                   styles.secondaryButtonText,
@@ -84,7 +143,7 @@ export default function PropertyDetailsScreen() {
 
             <Pressable
               style={[styles.secondaryButton, isSaved && styles.activeButton]}
-              onPress={() => setIsSaved((current) => !current)}>
+              onPress={handleToggleSave}>
               <Text
                 style={[
                   styles.secondaryButtonText,
@@ -359,5 +418,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f6f7f9',
   },
 });
