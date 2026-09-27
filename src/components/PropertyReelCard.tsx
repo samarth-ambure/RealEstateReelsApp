@@ -35,8 +35,6 @@ export function PropertyReelCard({
     !property.agentImage || failedCreatorImageUri === property.agentImage;
   const creatorInitials = getCreatorInitials(property.agentName);
 
-  const badgeLabel = property.propertyType?.trim() || 'For Sale';
-
   return (
     <View style={[styles.container, { height }]}>
       {hasImageError ? (
@@ -63,7 +61,7 @@ export function PropertyReelCard({
       <View pointerEvents="none" style={styles.bottomFade} />
 
       <View style={[styles.content, { paddingBottom: Math.max(bottomInset, 24) }]}>
-        <View style={styles.details}>
+        <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${property.agentName}'s profile`}
@@ -81,57 +79,17 @@ export function PropertyReelCard({
                 onError={() => setFailedCreatorImageUri(property.agentImage)}
               />
             )}
-            <View style={styles.creatorText}>
-              <Text style={styles.creatorName} numberOfLines={1}>
-                {property.agentName}
-              </Text>
-              <Text style={styles.viewProfileText}>View profile</Text>
-            </View>
-          </Pressable>
-
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{badgeLabel}</Text>
-          </View>
-
-          <Text style={styles.price}>{property.price}</Text>
-          <Text style={styles.title} numberOfLines={2}>
-            {property.title}
-          </Text>
-          <View style={styles.locationRow}>
-            <AppIcon
-              ios="mappin.and.ellipse"
-              android="location_on"
-              size={14}
-              color="rgba(255,255,255,0.78)"
-              fallback="📍"
-            />
-            <Text style={styles.location} numberOfLines={1}>
-              {property.location}
+            <Text style={styles.creatorName} numberOfLines={1}>
+              {property.agentName}
             </Text>
-          </View>
-
-          <View style={styles.statsRow}>
-            <Stat
-              ios="bed.double.fill"
-              android="bed"
-              fallback="🛏"
-              value={`${property.bedrooms} Beds`}
-            />
-            <Stat
-              ios="shower.fill"
-              android="bathtub"
-              fallback="🛁"
-              value={`${property.bathrooms} Baths`}
-            />
-            <Stat ios="square.dashed" android="square_foot" fallback="📐" value={property.area} />
-          </View>
+          </Pressable>
 
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`View details for ${property.title}`}
-            style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
+            accessibilityLabel={`View this property: ${property.title}`}
+            style={({ pressed }) => [styles.propertyCta, pressed && styles.pressed]}
             onPress={() => onOpen(property.id)}>
-            <Text style={styles.ctaText}>View Details</Text>
+            <Text style={styles.propertyCtaText}>View this property</Text>
           </Pressable>
         </View>
 
@@ -185,25 +143,6 @@ function getCreatorInitials(name?: string) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join('');
-}
-
-function Stat({
-  ios,
-  android,
-  fallback,
-  value,
-}: {
-  ios: string;
-  android: string;
-  fallback: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.stat}>
-      <AppIcon ios={ios} android={android} size={14} color="#fff" fallback={fallback} />
-      <Text style={styles.statText}>{value}</Text>
-    </View>
-  );
 }
 
 type ActionButtonProps = {
@@ -300,16 +239,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 340,
-    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+    height: 220,
+    backgroundColor: 'rgba(0, 0, 0, 0.32)',
   },
   bottomFade: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 180,
-    backgroundColor: 'rgba(8, 12, 24, 0.55)',
+    height: 140,
+    backgroundColor: 'rgba(8, 12, 24, 0.48)',
   },
   content: {
     ...StyleSheet.absoluteFill,
@@ -318,9 +257,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
-  details: {
+  footer: {
     flex: 1,
-    gap: 8,
+    gap: 10,
     paddingRight: 4,
   },
   creatorRow: {
@@ -328,121 +267,49 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 10,
   },
   creatorAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
   },
   creatorAvatarFallback: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
   },
   creatorAvatarText: {
     color: '#fff',
-    fontSize: 8,
+    fontSize: 13,
     fontWeight: '800',
   },
-  creatorText: {
-    flexShrink: 1,
-  },
   creatorName: {
+    flexShrink: 1,
     color: '#fff',
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '700',
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '800',
     textShadowColor: 'rgba(0, 0, 0, 0.45)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  viewProfileText: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 11,
-    lineHeight: 13,
-    fontWeight: '600',
-  },
-  badge: {
+  propertyCta: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 4,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-  },
-  price: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -0.6,
-    textShadowColor: 'rgba(0, 0, 0, 0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 8,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 26,
-    textShadowColor: 'rgba(0, 0, 0, 0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 6,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  location: {
-    flex: 1,
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  stat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  statText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cta: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
     borderRadius: 999,
     backgroundColor: '#fff',
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  ctaText: {
+  propertyCtaText: {
     color: '#111827',
     fontSize: 13,
     fontWeight: '800',
