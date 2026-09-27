@@ -33,7 +33,7 @@ function parseNumericValue(val: string | number | undefined): number {
   return parseFloat(clean) || 0;
 }
 
-function mapRowToProperty(row: PropertyDbRow): Property {
+function mapRowToProperty(row: PropertyDbRow, likedIds: Set<string> = new Set<string>(), savedIds: Set<string> = new Set<string>()): Property {
   return {
     id: row.id,
     title: row.title,
@@ -49,8 +49,8 @@ function mapRowToProperty(row: PropertyDbRow): Property {
     agentImage:
       row.agentImage ||
       'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=240&q=80',
-    isLiked: false,
-    isSaved: false,
+    isLiked: likedIds.has(row.id),
+    isSaved: savedIds.has(row.id),
     createdBy: row.userEmail || undefined,
   };
 }
@@ -98,7 +98,7 @@ export async function createProperty(
   );
 }
 
-export async function getAllProperties(): Promise<Property[]> {
+export async function getAllProperties(userId?: number): Promise<Property[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<PropertyDbRow>(
     `SELECT p.*, u.email as userEmail
@@ -107,7 +107,10 @@ export async function getAllProperties(): Promise<Property[]> {
      ORDER BY p.createdAt DESC`,
   );
 
-  return rows.map(mapRowToProperty);
+  const likedIds = userId ? await getLikedPropertyIds(userId) : new Set<string>();
+  const savedIds = userId ? await getSavedPropertyIds(userId) : new Set<string>();
+
+  return rows.map((row) => mapRowToProperty(row, likedIds, savedIds));
 }
 
 export async function getPropertiesByUserId(userId: number): Promise<Property[]> {
@@ -121,10 +124,13 @@ export async function getPropertiesByUserId(userId: number): Promise<Property[]>
     [userId],
   );
 
-  return rows.map(mapRowToProperty);
+  const likedIds = await getLikedPropertyIds(userId);
+  const savedIds = await getSavedPropertyIds(userId);
+
+  return rows.map((row) => mapRowToProperty(row, likedIds, savedIds));
 }
 
-export async function getPropertiesByUserEmail(email: string): Promise<Property[]> {
+export async function getPropertiesByUserEmail(email: string, currentUserId?: number): Promise<Property[]> {
   const db = await getDatabase();
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -137,14 +143,19 @@ export async function getPropertiesByUserEmail(email: string): Promise<Property[
     [normalizedEmail],
   );
 
-  return rows.map(mapRowToProperty);
+  const likedIds = currentUserId ? await getLikedPropertyIds(currentUserId) : new Set<string>();
+  const savedIds = currentUserId ? await getSavedPropertyIds(currentUserId) : new Set<string>();
+
+  return rows.map((row) => mapRowToProperty(row, likedIds, savedIds));
 }
 
-export async function getPropertyById(id: string): Promise<Property | null> {
+export async function getPropertyById(id: string, userId?: number): Promise<Property | null> {
   // 1. Check existing mock properties
   const mock = mockProperties.find((item) => item.id === id);
   if (mock) {
-    return mock;
+    const likedIds = userId ? await getLikedPropertyIds(userId) : new Set<string>();
+    const savedIds = userId ? await getSavedPropertyIds(userId) : new Set<string>();
+    return { ...mock, isLiked: likedIds.has(id), isSaved: savedIds.has(id) };
   }
 
   // 2. Check SQLite database
@@ -162,10 +173,136 @@ export async function getPropertyById(id: string): Promise<Property | null> {
     return null;
   }
 
-  return mapRowToProperty(row);
+  const likedIds = userId ? await getLikedPropertyIds(userId) : new Set<string>();
+  const savedIds = userId ? await getSavedPropertyIds(userId) : new Set<string>();
+
+  return mapRowToProperty(row, likedIds, savedIds);
 }
 
 export async function deleteProperty(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM properties WHERE id = ?', [id]);
+}
+
+// Like/Save operations
+export async function likeProperty(userId: number, propertyId: string): Promise<void> {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    'INSERT OR IGNORE INTO likes (userId, propertyId, createdAt) VALUES (?, ?, ?)',
+    [userId, propertyId, now],
+  );
+}
+
+export async function unlikeProperty(userId: number, propertyId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM likes WHERE userId = ? AND propertyId = ?', [userId, propertyId]);
+}
+
+export async function saveProperty(userId: number, propertyId: string): Promise<void> {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    'INSERT OR IGNORE INTO saves (userId, propertyId, createdAt) VALUES (?, ?, ?)',
+    [userId, propertyId, now],
+  );
+}
+
+export async function unsaveProperty(userId: number, propertyId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM saves WHERE userId = ? AND propertyId = ?', [userId, propertyId]);
+}
+
+export async function getLikedPropertyIds(userId: number): Promise<Set<string>> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ propertyId: string }>(
+    'SELECT propertyId FROM likes WHERE userId = ?',
+    [userId],
+  );
+  return new Set(rows.map((row) => row.propertyId));
+}
+
+export async function getSavedPropertyIds(userId: number): Promise<Set<string>> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ propertyId: string }>(
+    'SELECT propertyId FROM saves WHERE userId = ?',
+    [userId],
+  );
+  return new Set(rows.map((row) => row.propertyId));
+}
+
+export async function isPropertyLiked(userId: number, propertyId: string): Promise<boolean> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) as count FROM likes WHERE userId = ? AND propertyId = ?',
+    [userId, propertyId],
+  );
+  return (row?.count ?? 0) > 0;
+}
+
+export async function isPropertySaved(userId: number, propertyId: string): Promise<boolean> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) as count FROM saves WHERE userId = ? AND propertyId = ?',
+    [userId, propertyId],
+  );
+  return (row?.count ?? 0) > 0;
+}
+
+export async function getLikedProperties(userId: number): Promise<Property[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<PropertyDbRow>(
+    `SELECT p.*, u.email as userEmail
+     FROM properties p
+     INNER JOIN likes l ON p.id = l.propertyId
+     LEFT JOIN users u ON p.userId = u.id
+     WHERE l.userId = ?
+     ORDER BY l.createdAt DESC`,
+    [userId],
+  );
+
+  const likedIds = await getLikedPropertyIds(userId);
+  const savedIds = await getSavedPropertyIds(userId);
+
+  const dbProperties = rows.map((row) => mapRowToProperty(row, likedIds, savedIds));
+
+  // Also include mock properties that are liked
+  const mockLikedProperties = mockProperties
+    .filter((mock) => likedIds.has(mock.id))
+    .map((mock) => ({
+      ...mock,
+      isLiked: true,
+      isSaved: savedIds.has(mock.id),
+    }));
+
+  return [...mockLikedProperties, ...dbProperties];
+}
+
+export async function getSavedProperties(userId: number): Promise<Property[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<PropertyDbRow>(
+    `SELECT p.*, u.email as userEmail
+     FROM properties p
+     INNER JOIN saves s ON p.id = s.propertyId
+     LEFT JOIN users u ON p.userId = u.id
+     WHERE s.userId = ?
+     ORDER BY s.createdAt DESC`,
+    [userId],
+  );
+
+  const likedIds = await getLikedPropertyIds(userId);
+  const savedIds = await getSavedPropertyIds(userId);
+
+  const dbProperties = rows.map((row) => mapRowToProperty(row, likedIds, savedIds));
+
+  // Also include mock properties that are saved
+  const mockSavedProperties = mockProperties
+    .filter((mock) => savedIds.has(mock.id))
+    .map((mock) => ({
+      ...mock,
+      isLiked: likedIds.has(mock.id),
+      isSaved: true,
+    }));
+
+  return [...mockSavedProperties, ...dbProperties];
 }

@@ -1,7 +1,13 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+    Animated,
+    Pressable,
+    StyleSheet,
+    Text,
+    View
+} from 'react-native';
 
 import { Property } from '@/types/property';
 
@@ -30,10 +36,54 @@ export function PropertyReelCard({
 }: PropertyReelCardProps) {
   const [failedImageUri, setFailedImageUri] = useState<string | null>(null);
   const [failedCreatorImageUri, setFailedCreatorImageUri] = useState<string | null>(null);
+  const [showHeartAnimation, setShowHeartAnimation] = useState(false);
+  const heartScale = useState(() => new Animated.Value(0))[0];
+  const heartOpacity = useState(() => new Animated.Value(0))[0];
+  const lastTapRef = useState({ current: 0 })[0];
+
   const hasImageError = !property.image || failedImageUri === property.image;
   const hasCreatorImageError =
     !property.agentImage || failedCreatorImageUri === property.agentImage;
   const creatorInitials = getCreatorInitials(property.agentName);
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      // Double tap detected
+      if (!property.isLiked) {
+        onLike(property.id);
+      }
+      triggerHeartAnimation();
+    }
+    lastTapRef.current = now;
+  };
+
+  const triggerHeartAnimation = () => {
+    setShowHeartAnimation(true);
+    heartScale.setValue(0);
+    heartOpacity.setValue(1);
+
+    Animated.sequence([
+      Animated.timing(heartScale, {
+        toValue: 1.2,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(heartScale, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(heartOpacity, {
+        toValue: 0,
+        duration: 200,
+        delay: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowHeartAnimation(false);
+    });
+  };
 
   return (
     <View style={[styles.container, { height }]}>
@@ -49,12 +99,32 @@ export function PropertyReelCard({
           <Text style={styles.fallbackText}>Property photo unavailable</Text>
         </View>
       ) : (
-        <Image
-          source={{ uri: property.image }}
-          style={styles.image}
-          contentFit="cover"
-          onError={() => setFailedImageUri(property.image)}
-        />
+        <Pressable onPress={handleDoubleTap} style={styles.imagePressable}>
+          <Image
+            source={{ uri: property.image }}
+            style={styles.image}
+            contentFit="cover"
+            onError={() => setFailedImageUri(property.image)}
+          />
+          {showHeartAnimation && (
+            <Animated.View
+              style={[
+                styles.heartOverlay,
+                {
+                  transform: [{ scale: heartScale }],
+                  opacity: heartOpacity,
+                },
+              ]}>
+              <AppIcon
+                ios="heart.fill"
+                android="favorite"
+                size={80}
+                color="#fff"
+                fallback="❤️"
+              />
+            </Animated.View>
+          )}
+        </Pressable>
       )}
 
       <View pointerEvents="none" style={styles.bottomScrim} />
@@ -221,6 +291,14 @@ const styles = StyleSheet.create({
   },
   image: {
     ...StyleSheet.absoluteFill,
+  },
+  imagePressable: {
+    ...StyleSheet.absoluteFill,
+  },
+  heartOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fallback: {
     ...StyleSheet.absoluteFill,

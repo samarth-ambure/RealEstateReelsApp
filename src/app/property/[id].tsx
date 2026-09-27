@@ -1,22 +1,30 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
+import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
-import { getPropertyById } from '@/database/propertyRepository';
+import {
+    getPropertyById,
+    likeProperty,
+    saveProperty,
+    unlikeProperty,
+    unsaveProperty,
+} from '@/database/propertyRepository';
 import { Property } from '@/types/property';
 
 export default function PropertyDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
   const propertyId = Array.isArray(id) ? id[0] : id;
 
   const mockProperty = useMemo(
@@ -43,7 +51,7 @@ export default function PropertyDetailsScreen() {
     let isMounted = true;
     const fetchProperty = async () => {
       try {
-        const found = await getPropertyById(propertyId ?? '');
+        const found = await getPropertyById(propertyId ?? '', user?.id);
         if (isMounted) {
           setUserProperty(found);
         }
@@ -63,7 +71,7 @@ export default function PropertyDetailsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [mockProperty, propertyId]);
+  }, [mockProperty, propertyId, user?.id]);
 
   const handleContactAgent = () => {
     Alert.alert(
@@ -72,12 +80,40 @@ export default function PropertyDetailsScreen() {
     );
   };
 
-  const handleToggleLike = () => {
-    setHasLiked(!isLiked);
+  const handleToggleLike = async () => {
+    if (!user?.id || !property) return;
+
+    const newLikedState = !isLiked;
+    setHasLiked(newLikedState);
+
+    try {
+      if (newLikedState) {
+        await likeProperty(user.id, property.id);
+      } else {
+        await unlikeProperty(user.id, property.id);
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      setHasLiked(isLiked);
+    }
   };
 
-  const handleToggleSave = () => {
-    setHasSaved(!isSaved);
+  const handleToggleSave = async () => {
+    if (!user?.id || !property) return;
+
+    const newSavedState = !isSaved;
+    setHasSaved(newSavedState);
+
+    try {
+      if (newSavedState) {
+        await saveProperty(user.id, property.id);
+      } else {
+        await unsaveProperty(user.id, property.id);
+      }
+    } catch (error) {
+      console.error('Error toggling save:', error);
+      setHasSaved(isSaved);
+    }
   };
 
   if (isLoadingUserProperty) {

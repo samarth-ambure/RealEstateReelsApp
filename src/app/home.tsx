@@ -2,25 +2,32 @@ import { router, useFocusEffect } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  ListRenderItem,
-  Modal,
-  Pressable,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    ListRenderItem,
+    Modal,
+    Pressable,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PropertyReelCard } from '@/components/PropertyReelCard';
+import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
-import { getAllProperties } from '@/database/propertyRepository';
+import {
+    getAllProperties,
+    likeProperty,
+    saveProperty,
+    unlikeProperty,
+    unsaveProperty,
+} from '@/database/propertyRepository';
 import { findUserByEmail } from '@/database/userRepository';
 import { Property } from '@/types/property';
 
@@ -72,6 +79,7 @@ function matchesPriceFilter(property: Property, priceFilter: PriceFilter) {
 }
 
 export default function HomeScreen() {
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [properties, setProperties] = useState<Property[]>(mockProperties);
@@ -87,7 +95,7 @@ export default function HomeScreen() {
 
       void (async () => {
         try {
-          const sqliteProperties = await getAllProperties();
+          const sqliteProperties = await getAllProperties(user?.id);
           if (!isActive) {
             return;
           }
@@ -126,7 +134,7 @@ export default function HomeScreen() {
       return () => {
         isActive = false;
       };
-    }, []),
+    }, [user?.id]),
   );
 
   const propertyTypeOptions = useMemo(
@@ -211,25 +219,77 @@ export default function HomeScreen() {
     router.push('/create-property');
   };
 
-  const handleLike = useCallback((propertyId: string) => {
-    setProperties((currentProperties) =>
-      currentProperties.map((property) =>
-        property.id === propertyId
-          ? { ...property, isLiked: !property.isLiked }
-          : property,
-      ),
-    );
-  }, []);
+  const handleLike = useCallback(
+    async (propertyId: string) => {
+      if (!user?.id) return;
 
-  const handleSave = useCallback((propertyId: string) => {
-    setProperties((currentProperties) =>
-      currentProperties.map((property) =>
-        property.id === propertyId
-          ? { ...property, isSaved: !property.isSaved }
-          : property,
-      ),
-    );
-  }, []);
+      const property = properties.find((p) => p.id === propertyId);
+      if (!property) return;
+
+      const newLikedState = !property.isLiked;
+
+      // Update local state immediately for UI feedback
+      setProperties((currentProperties) =>
+        currentProperties.map((p) =>
+          p.id === propertyId ? { ...p, isLiked: newLikedState } : p,
+        ),
+      );
+
+      // Persist to SQLite
+      try {
+        if (newLikedState) {
+          await likeProperty(user.id, propertyId);
+        } else {
+          await unlikeProperty(user.id, propertyId);
+        }
+      } catch (error) {
+        console.error('Error toggling like:', error);
+        // Revert on error
+        setProperties((currentProperties) =>
+          currentProperties.map((p) =>
+            p.id === propertyId ? { ...p, isLiked: property.isLiked } : p,
+          ),
+        );
+      }
+    },
+    [properties, user?.id],
+  );
+
+  const handleSave = useCallback(
+    async (propertyId: string) => {
+      if (!user?.id) return;
+
+      const property = properties.find((p) => p.id === propertyId);
+      if (!property) return;
+
+      const newSavedState = !property.isSaved;
+
+      // Update local state immediately for UI feedback
+      setProperties((currentProperties) =>
+        currentProperties.map((p) =>
+          p.id === propertyId ? { ...p, isSaved: newSavedState } : p,
+        ),
+      );
+
+      // Persist to SQLite
+      try {
+        if (newSavedState) {
+          await saveProperty(user.id, propertyId);
+        } else {
+          await unsaveProperty(user.id, propertyId);
+        }
+      } catch (error) {
+        console.error('Error toggling save:', error);
+        // Revert on error
+        setProperties((currentProperties) =>
+          currentProperties.map((p) =>
+            p.id === propertyId ? { ...p, isSaved: property.isSaved } : p,
+          ),
+        );
+      }
+    },
+    [properties, user?.id],
+  );
 
   const handleComment = useCallback((property: Property) => {
     Alert.alert(

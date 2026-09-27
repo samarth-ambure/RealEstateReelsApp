@@ -50,6 +50,24 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           userId INTEGER NOT NULL,
           FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS likes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          userId INTEGER NOT NULL,
+          propertyId TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(userId, propertyId)
+        );
+
+        CREATE TABLE IF NOT EXISTS saves (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          userId INTEGER NOT NULL,
+          propertyId TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(userId, propertyId)
+        );
       `);
 
       dbInstance = db;

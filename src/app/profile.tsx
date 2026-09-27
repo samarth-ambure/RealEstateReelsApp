@@ -1,25 +1,33 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
 import {
-  getPropertiesByUserEmail,
-  getPropertiesByUserId,
+    getLikedProperties,
+    getPropertiesByUserEmail,
+    getPropertiesByUserId,
+    getSavedProperties,
+    likeProperty,
+    saveProperty,
+    unlikeProperty,
+    unsaveProperty,
 } from '@/database/propertyRepository';
 import { getUserById, UserRow } from '@/database/userRepository';
 import { Property } from '@/types/property';
 
 const DEFAULT_BIO = 'Real estate enthusiast';
+
+type ProfileTab = 'posts' | 'liked' | 'saved';
 
 function getInitials(name?: string) {
   if (!name?.trim()) {
@@ -65,6 +73,9 @@ export default function ProfileScreen() {
 
   const [viewedUser, setViewedUser] = useState<UserRow | null>(null);
   const [userPosts, setUserPosts] = useState<Property[]>([]);
+  const [likedProperties, setLikedProperties] = useState<Property[]>([]);
+  const [savedProperties, setSavedProperties] = useState<Property[]>([]);
+  const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -74,17 +85,29 @@ export default function ProfileScreen() {
       if (!user) {
         setViewedUser(null);
         setUserPosts([]);
+        setLikedProperties([]);
+        setSavedProperties([]);
         return;
       }
 
       try {
         const posts = user.id
           ? await getPropertiesByUserId(user.id)
-          : await getPropertiesByUserEmail(user.email);
+          : await getPropertiesByUserEmail(user.email, user.id);
         setViewedUser(null);
         setUserPosts(posts);
+
+        // Load liked and saved properties
+        if (user.id) {
+          const liked = await getLikedProperties(user.id);
+          const saved = await getSavedProperties(user.id);
+          setLikedProperties(liked);
+          setSavedProperties(saved);
+        }
       } catch {
         setUserPosts([]);
+        setLikedProperties([]);
+        setSavedProperties([]);
       }
       return;
     }
@@ -95,9 +118,13 @@ export default function ProfileScreen() {
         setViewedUser(otherUser);
         const posts = otherUser ? await getPropertiesByUserId(otherUser.id) : [];
         setUserPosts(posts);
+        setLikedProperties([]);
+        setSavedProperties([]);
       } catch {
         setViewedUser(null);
         setUserPosts([]);
+        setLikedProperties([]);
+        setSavedProperties([]);
       }
       return;
     }
@@ -108,6 +135,8 @@ export default function ProfileScreen() {
         ? mockProperties.filter((property) => property.agentName === displayName)
         : [],
     );
+    setLikedProperties([]);
+    setSavedProperties([]);
   }, [displayName, isOwnProfile, parsedUserId, user]);
 
   useFocusEffect(
@@ -154,6 +183,46 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     await logout();
     router.replace('/');
+  };
+
+  const handleLike = async (propertyId: string) => {
+    if (!user?.id) return;
+
+    try {
+      if (likedProperties.some((p) => p.id === propertyId)) {
+        await unlikeProperty(user.id, propertyId);
+        setLikedProperties((prev) => prev.filter((p) => p.id !== propertyId));
+      } else {
+        await likeProperty(user.id, propertyId);
+        // Add to liked properties
+        const property = [...userPosts, ...savedProperties].find((p) => p.id === propertyId);
+        if (property) {
+          setLikedProperties((prev) => [{ ...property, isLiked: true }, ...prev]);
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+    }
+  };
+
+  const handleSave = async (propertyId: string) => {
+    if (!user?.id) return;
+
+    try {
+      if (savedProperties.some((p) => p.id === propertyId)) {
+        await unsaveProperty(user.id, propertyId);
+        setSavedProperties((prev) => prev.filter((p) => p.id !== propertyId));
+      } else {
+        await saveProperty(user.id, propertyId);
+        // Add to saved properties
+        const property = [...userPosts, ...likedProperties].find((p) => p.id === propertyId);
+        if (property) {
+          setSavedProperties((prev) => [{ ...property, isSaved: true }, ...prev]);
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling save:', error);
+    }
   };
 
   return (
@@ -222,16 +291,47 @@ export default function ProfileScreen() {
           <ProfileStat label="Posts" value={String(userPosts.length)} />
           {isOwnProfile ? (
             <>
-              <ProfileStat label="Saved" value="0" />
-              <ProfileStat label="Likes" value="0" />
+              <ProfileStat label="Saved" value={String(savedProperties.length)} />
+              <ProfileStat label="Likes" value={String(likedProperties.length)} />
             </>
           ) : null}
         </View>
 
+        {isOwnProfile ? (
+          <View style={styles.tabsRow}>
+            <ProfileTab
+              label="Posts"
+              count={userPosts.length}
+              isActive={activeTab === 'posts'}
+              onPress={() => setActiveTab('posts')}
+            />
+            <ProfileTab
+              label="Liked"
+              count={likedProperties.length}
+              isActive={activeTab === 'liked'}
+              onPress={() => setActiveTab('liked')}
+            />
+            <ProfileTab
+              label="Saved"
+              count={savedProperties.length}
+              isActive={activeTab === 'saved'}
+              onPress={() => setActiveTab('saved')}
+            />
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{isOwnProfile ? 'Your Posts' : 'Properties'}</Text>
-            {isOwnProfile && userPosts.length > 0 ? (
+            <Text style={styles.sectionTitle}>
+              {isOwnProfile
+                ? activeTab === 'posts'
+                  ? 'Your Posts'
+                  : activeTab === 'liked'
+                    ? 'Liked Properties'
+                    : 'Saved Properties'
+                : 'Properties'}
+            </Text>
+            {isOwnProfile && activeTab === 'posts' && userPosts.length > 0 ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Create another post"
@@ -242,51 +342,88 @@ export default function ProfileScreen() {
             ) : null}
           </View>
 
-          {userPosts.length > 0 ? (
-            <View style={styles.postsList}>
-              {userPosts.map((post) => (
-                <Pressable
-                  key={post.id}
-                  style={styles.postCard}
-                  onPress={() => handleOpenProperty(post.id)}>
-                  <Image source={{ uri: post.image }} style={styles.postThumbnail} />
-                  <View style={styles.postDetails}>
-                    <Text style={styles.postPrice}>{post.price}</Text>
-                    <Text style={styles.postTitle} numberOfLines={1}>
-                      {post.title}
-                    </Text>
-                    <Text style={styles.postLocation} numberOfLines={1}>
-                      📍 {post.location}
-                    </Text>
-                    <View style={styles.postMetaRow}>
-                      <Text style={styles.postMetaBadge}>{post.propertyType}</Text>
-                      <Text style={styles.postMetaBadge}>
-                        {post.bedrooms} bd • {post.bathrooms} ba
-                      </Text>
-                      <Text style={styles.postMetaBadge}>{post.area}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.postChevron}>›</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>
-                {isOwnProfile ? 'No posts yet' : 'No properties yet'}
-              </Text>
-              <Text style={styles.emptyText}>
-                {isOwnProfile
-                  ? 'Create your first property post.'
-                  : 'This creator has not listed any properties.'}
-              </Text>
-              {isOwnProfile ? (
-                <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
-                  <Text style={styles.emptyPostButtonText}>+ Post</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )}
+          {(() => {
+            const currentProperties =
+              activeTab === 'posts'
+                ? userPosts
+                : activeTab === 'liked'
+                  ? likedProperties
+                  : savedProperties;
+
+            if (currentProperties.length > 0) {
+              return (
+                <View style={styles.postsList}>
+                  {currentProperties.map((post) => (
+                    <Pressable
+                      key={post.id}
+                      style={styles.postCard}
+                      onPress={() => handleOpenProperty(post.id)}>
+                      <Image source={{ uri: post.image }} style={styles.postThumbnail} />
+                      <View style={styles.postDetails}>
+                        <Text style={styles.postPrice}>{post.price}</Text>
+                        <Text style={styles.postTitle} numberOfLines={1}>
+                          {post.title}
+                        </Text>
+                        <Text style={styles.postLocation} numberOfLines={1}>
+                          📍 {post.location}
+                        </Text>
+                        <View style={styles.postMetaRow}>
+                          <Text style={styles.postMetaBadge}>{post.propertyType}</Text>
+                          <Text style={styles.postMetaBadge}>
+                            {post.bedrooms} bd • {post.bathrooms} ba
+                          </Text>
+                          <Text style={styles.postMetaBadge}>{post.area}</Text>
+                        </View>
+                      </View>
+                      {isOwnProfile && (activeTab === 'liked' || activeTab === 'saved') ? (
+                        <Pressable
+                          style={styles.removeButton}
+                          onPress={() =>
+                            activeTab === 'liked'
+                              ? handleLike(post.id)
+                              : handleSave(post.id)
+                          }>
+                          <Text style={styles.removeButtonText}>
+                            {activeTab === 'liked' ? '💔' : '🗑️'}
+                          </Text>
+                        </Pressable>
+                      ) : (
+                        <Text style={styles.postChevron}>›</Text>
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            }
+
+            return (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>
+                  {isOwnProfile
+                    ? activeTab === 'posts'
+                      ? 'No posts yet'
+                      : activeTab === 'liked'
+                        ? 'No liked properties yet'
+                        : 'No saved properties yet'
+                    : 'No properties yet'}
+                </Text>
+                <Text style={styles.emptyText}>
+                  {isOwnProfile
+                    ? activeTab === 'posts'
+                      ? 'Create your first property post.'
+                      : activeTab === 'liked'
+                        ? 'Like properties to see them here.'
+                        : 'Save properties to see them here.'
+                    : 'This creator has not listed any properties.'}
+                </Text>
+                {isOwnProfile && activeTab === 'posts' ? (
+                  <Pressable style={styles.emptyPostButton} onPress={handleCreatePost}>
+                    <Text style={styles.emptyPostButtonText}>+ Post</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })()}
         </View>
       </ScrollView>
     </View>
@@ -304,6 +441,28 @@ function ProfileStat({ label, value }: ProfileStatProps) {
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
+  );
+}
+
+type ProfileTabProps = {
+  label: string;
+  count: number;
+  isActive: boolean;
+  onPress: () => void;
+};
+
+function ProfileTab({ label, count, isActive, onPress }: ProfileTabProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.tab,
+        isActive && styles.activeTab,
+        pressed && styles.pressed,
+      ]}
+      onPress={onPress}>
+      <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>{label}</Text>
+      <Text style={[styles.tabCount, isActive && styles.activeTabCount]}>{count}</Text>
+    </Pressable>
   );
 }
 
@@ -468,6 +627,44 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
   },
+  tabsRow: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    padding: 4,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#edf0f4',
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  activeTab: {
+    backgroundColor: '#111827',
+  },
+  tabLabel: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  activeTabLabel: {
+    color: '#fff',
+  },
+  tabCount: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  activeTabCount: {
+    color: '#93c5fd',
+  },
+  pressed: {
+    opacity: 0.7,
+  },
   section: {
     marginTop: 24,
   },
@@ -554,6 +751,17 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     fontWeight: '600',
     paddingRight: 4,
+  },
+  removeButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#fef2f2',
+  },
+  removeButtonText: {
+    fontSize: 18,
   },
   emptyState: {
     alignItems: 'center',
