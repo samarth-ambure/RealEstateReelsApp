@@ -12,9 +12,11 @@ import { migrateFromAsyncStorage } from '@/database/migration';
 import {
   clearActiveSession,
   createUser,
+  findOrCreateGoogleUser,
   findUserByEmail,
   findUserForAuth,
   getActiveSessionUser,
+  GoogleUserPayload,
   setActiveSession,
   UserRow,
 } from '@/database/userRepository';
@@ -34,6 +36,7 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  loginWithGoogle: (googleUser: GoogleUserPayload) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -108,6 +111,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(toAuthUser(createdUser));
   };
 
+  const loginWithGoogle = async (googleUser: GoogleUserPayload) => {
+    const userRow = await findOrCreateGoogleUser(googleUser);
+    await setActiveSession(userRow.id);
+    setUser(toAuthUser(userRow));
+  };
+
   const logout = async () => {
     await clearActiveSession();
     setUser(null);
@@ -120,6 +129,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       isAuthenticated: Boolean(user),
       login,
       register,
+      loginWithGoogle,
       logout,
     }),
     [isLoading, user],

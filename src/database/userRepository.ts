@@ -85,6 +85,50 @@ export async function createUser(input: CreateUserInput): Promise<UserRow> {
   };
 }
 
+export type GoogleUserPayload = {
+  id?: string;
+  email: string;
+  name?: string | null;
+  photo?: string | null;
+};
+
+export async function findOrCreateGoogleUser(
+  googleUser: GoogleUserPayload,
+): Promise<UserRow> {
+  const normalizedEmail = googleUser.email.trim().toLowerCase();
+  const existing = await findUserByEmail(normalizedEmail);
+
+  if (existing) {
+    if (!existing.profileImage && googleUser.photo) {
+      await updateUserProfile(existing.id, { profileImage: googleUser.photo });
+      existing.profileImage = googleUser.photo;
+    }
+    return existing;
+  }
+
+  const db = await getDatabase();
+  const name =
+    googleUser.name?.trim() || normalizedEmail.split('@')[0] || 'Google User';
+  const now = new Date().toISOString();
+  const bio = 'Real estate enthusiast';
+  const profileImage = googleUser.photo?.trim() || null;
+  const placeholderPassword = `oauth_google_${googleUser.id ?? Date.now()}`;
+
+  const result = await db.runAsync(
+    'INSERT INTO users (name, email, password, bio, profileImage, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    [name, normalizedEmail, placeholderPassword, bio, profileImage, now],
+  );
+
+  return {
+    id: result.lastInsertRowId,
+    name,
+    email: normalizedEmail,
+    bio,
+    profileImage,
+    createdAt: now,
+  };
+}
+
 export async function updateUserProfile(
   id: number,
   updates: { name?: string; bio?: string; profileImage?: string },
