@@ -68,6 +68,13 @@ function RootNavigator() {
             headerShown: false,
           }}
         />
+
+        <Stack.Screen
+          name="messages"
+          options={{
+            headerShown: false,
+          }}
+        />
       </Stack.Protected>
     </Stack>
   );

@@ -219,6 +219,10 @@ export default function HomeScreen() {
     router.push('/create-property');
   };
 
+  const handleOpenMessages = () => {
+    router.push('/messages');
+  };
+
   const handleLike = useCallback(
     async (propertyId: string) => {
       if (!user?.id) return;
@@ -510,6 +514,13 @@ export default function HomeScreen() {
             fallback="⌂"
             isActive
             onPress={() => undefined}
+          />
+          <NavItem
+            label="Messages"
+            ios="bubble.left.and.bubble.right.fill"
+            android="chat"
+            fallback="💬"
+            onPress={handleOpenMessages}
           />
           <NavItem
             label="Post"

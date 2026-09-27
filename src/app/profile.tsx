@@ -28,6 +28,7 @@ import { Property } from '@/types/property';
 const DEFAULT_BIO = 'Real estate enthusiast';
 
 type ProfileTab = 'posts' | 'liked' | 'saved';
+type ThemeMode = 'light' | 'dark';
 
 function getInitials(name?: string) {
   if (!name?.trim()) {
@@ -71,12 +72,17 @@ export default function ProfileScreen() {
     (!requestedUserId && !displayName) ||
     (Number.isFinite(parsedUserId) && user?.id === parsedUserId);
 
+  const handleThemeToggle = () => {
+    setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
   const [viewedUser, setViewedUser] = useState<UserRow | null>(null);
   const [userPosts, setUserPosts] = useState<Property[]>([]);
   const [likedProperties, setLikedProperties] = useState<Property[]>([]);
   const [savedProperties, setSavedProperties] = useState<Property[]>([]);
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
 
   const loadProfile = useCallback(async () => {
     setFailedAvatarUri(null);
@@ -243,9 +249,19 @@ export default function ProfileScreen() {
           <Text style={styles.screenTitle}>{isOwnProfile ? 'Profile' : 'Creator'}</Text>
 
           {isOwnProfile ? (
-            <Pressable style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutButtonText}>Logout</Text>
-            </Pressable>
+            <View style={styles.topBarActions}>
+              <Pressable
+                style={styles.themeButton}
+                onPress={handleThemeToggle}
+                accessibilityLabel="Toggle theme">
+                <Text style={styles.themeButtonText}>
+                  {themeMode === 'light' ? '🌙' : '☀️'}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.logoutButton} onPress={handleLogout}>
+                <Text style={styles.logoutButtonText}>Logout</Text>
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.topBarSpacer} />
           )}
@@ -494,6 +510,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '800',
+  },
+  topBarActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  themeButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  themeButtonText: {
+    fontSize: 16,
   },
   profileHeader: {
     alignItems: 'center',
