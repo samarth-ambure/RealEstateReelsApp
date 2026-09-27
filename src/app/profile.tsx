@@ -287,16 +287,6 @@ export default function ProfileScreen() {
           ) : null}
         </View>
 
-        <View style={styles.statsRow}>
-          <ProfileStat label="Posts" value={String(userPosts.length)} />
-          {isOwnProfile ? (
-            <>
-              <ProfileStat label="Saved" value={String(savedProperties.length)} />
-              <ProfileStat label="Likes" value={String(likedProperties.length)} />
-            </>
-          ) : null}
-        </View>
-
         {isOwnProfile ? (
           <View style={styles.tabsRow}>
             <ProfileTab
@@ -426,20 +416,6 @@ export default function ProfileScreen() {
           })()}
         </View>
       </ScrollView>
-    </View>
-  );
-}
-
-type ProfileStatProps = {
-  label: string;
-  value: string;
-};
-
-function ProfileStat({ label, value }: ProfileStatProps) {
-  return (
-    <View style={styles.statItem}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
@@ -602,30 +578,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    borderRadius: 22,
-    backgroundColor: '#fff',
-    paddingVertical: 18,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#edf0f4',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    color: '#111827',
-    fontSize: 24,
-    fontWeight: '900',
-  },
-  statLabel: {
-    color: '#6b7280',
-    fontSize: 13,
-    fontWeight: '800',
-    marginTop: 4,
   },
   tabsRow: {
     flexDirection: 'row',
