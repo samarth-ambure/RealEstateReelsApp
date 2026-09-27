@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
+import { useThemeContext } from '@/context/ThemeContext';
 import { mockProperties } from '@/data/properties';
 import {
     getLikedProperties,
@@ -28,7 +29,6 @@ import { Property } from '@/types/property';
 const DEFAULT_BIO = 'Real estate enthusiast';
 
 type ProfileTab = 'posts' | 'liked' | 'saved';
-type ThemeMode = 'light' | 'dark';
 
 function getInitials(name?: string) {
   if (!name?.trim()) {
@@ -72,6 +72,8 @@ export default function ProfileScreen() {
     (!requestedUserId && !displayName) ||
     (Number.isFinite(parsedUserId) && user?.id === parsedUserId);
 
+  const { themeMode, setThemeMode } = useThemeContext();
+
   const handleThemeToggle = () => {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
@@ -82,7 +84,6 @@ export default function ProfileScreen() {
   const [savedProperties, setSavedProperties] = useState<Property[]>([]);
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
 
   const loadProfile = useCallback(async () => {
     setFailedAvatarUri(null);
