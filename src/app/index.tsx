@@ -172,6 +172,13 @@ export default function LoginScreen() {
   );
 
   useEffect(() => {
+    if (__DEV__) {
+      console.log('[Google Auth] Client ID:', googleClientId);
+      console.log('[Google Auth] Redirect URI:', redirectUri);
+    }
+  }, [googleClientId, redirectUri]);
+
+  useEffect(() => {
     if (response) {
       processAuthResult(response);
     }
