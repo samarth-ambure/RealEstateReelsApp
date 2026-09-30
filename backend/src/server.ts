@@ -6,6 +6,7 @@ import authRoutes from "./routes/authRoutes";
 import propertyRoutes from "./routes/propertyRoutes";
 import userRoutes from "./routes/userRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
+import conversationRoutes from "./routes/conversationRoutes";
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/properties", propertyRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/conversations", conversationRoutes);
 
 app.get("/", (req, res) => {
   res.json({
