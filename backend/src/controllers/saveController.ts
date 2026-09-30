@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { pool } from "../config/db";
 import { AuthRequest } from "../middleware/authMiddleware";
+import { createNotification } from "../services/notificationService";
 
 export const saveProperty = async (req: AuthRequest, res: Response) => {
   try {
@@ -15,10 +16,15 @@ export const saveProperty = async (req: AuthRequest, res: Response) => {
     }
 
     // Verify property exists
-    const propCheck = await pool.query("SELECT id FROM properties WHERE id = $1", [propertyId]);
+    const propCheck = await pool.query(
+      "SELECT id, user_id, title FROM properties WHERE id = $1",
+      [propertyId]
+    );
     if (propCheck.rows.length === 0) {
       return res.status(404).json({ message: "Property not found" });
     }
+
+    const property = propCheck.rows[0];
 
     // Check if already saved
     const existingSave = await pool.query(
@@ -40,6 +46,18 @@ export const saveProperty = async (req: AuthRequest, res: Response) => {
         return res.status(400).json({ message: "Property already saved" });
       }
       throw insertError;
+    }
+
+    // Trigger notification for property owner (prevent self-notifications)
+    if (property.user_id !== userId) {
+      const actorRes = await pool.query("SELECT name FROM users WHERE id = $1", [userId]);
+      const actorName = actorRes.rows[0]?.name || "Someone";
+      await createNotification({
+        userId: property.user_id,
+        type: "SAVE",
+        title: "Property Saved",
+        message: `${actorName} saved your property "${property.title}"`,
+      });
     }
 
     res.status(201).json({
