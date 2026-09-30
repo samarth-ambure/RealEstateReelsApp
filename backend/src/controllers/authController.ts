@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { pool } from "../config/db";
 import { AuthRequest } from "../middleware/authMiddleware";
+import { getUserStats } from "./userController";
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -107,8 +108,14 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const stats = await getUserStats(userId);
+
     res.json({
-      user: result.rows[0],
+      user: {
+        ...result.rows[0],
+        stats,
+      },
+      stats,
     });
   } catch (error) {
     console.error(error);
