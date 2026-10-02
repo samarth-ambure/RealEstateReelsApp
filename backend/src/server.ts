@@ -1,16 +1,28 @@
+import http from "http";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { Server } from "socket.io";
 import { pool } from "./config/db";
 import authRoutes from "./routes/authRoutes";
 import propertyRoutes from "./routes/propertyRoutes";
 import userRoutes from "./routes/userRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import conversationRoutes from "./routes/conversationRoutes";
+import { socketHandler } from "./socket/socketHandler";
 
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
+
+socketHandler(io);
 
 app.use(cors());
 app.use(express.json());
@@ -33,6 +45,8 @@ pool.query("SELECT NOW()")
   .then(() => console.log("Database connection successful"))
   .catch((err: any) => console.error("Database connection failed:", err));
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+export { app, server, io };
