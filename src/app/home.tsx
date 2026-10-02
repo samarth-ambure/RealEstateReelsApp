@@ -26,7 +26,7 @@ import {
     saveProperty,
     unlikeProperty,
     unsaveProperty,
-} from '@/database/propertyRepository';
+} from '@/services/engagementService';
 import { findUserByEmail } from '@/database/userRepository';
 import { getProperties } from '@/services/propertyService';
 import { Property } from '@/types/property';
@@ -220,26 +220,29 @@ export default function HomeScreen() {
 
   const handleLike = useCallback(
     async (propertyId: string) => {
-      if (!user?.id) return;
+      if (!user) {
+        Alert.alert('Sign In Required', 'Please sign in to like properties.');
+        return;
+      }
 
       const property = properties.find((p) => p.id === propertyId);
       if (!property) return;
 
       const newLikedState = !property.isLiked;
 
-      // Update local state immediately for UI feedback
+      // Optimistic UI update
       setProperties((currentProperties) =>
         currentProperties.map((p) =>
           p.id === propertyId ? { ...p, isLiked: newLikedState } : p,
         ),
       );
 
-      // Persist to SQLite
+      // Persist to backend API
       try {
         if (newLikedState) {
-          await likeProperty(user.id, propertyId);
+          await likeProperty(propertyId);
         } else {
-          await unlikeProperty(user.id, propertyId);
+          await unlikeProperty(propertyId);
         }
       } catch (error) {
         console.error('Error toggling like:', error);
@@ -251,31 +254,34 @@ export default function HomeScreen() {
         );
       }
     },
-    [properties, user?.id],
+    [properties, user],
   );
 
   const handleSave = useCallback(
     async (propertyId: string) => {
-      if (!user?.id) return;
+      if (!user) {
+        Alert.alert('Sign In Required', 'Please sign in to save properties.');
+        return;
+      }
 
       const property = properties.find((p) => p.id === propertyId);
       if (!property) return;
 
       const newSavedState = !property.isSaved;
 
-      // Update local state immediately for UI feedback
+      // Optimistic UI update
       setProperties((currentProperties) =>
         currentProperties.map((p) =>
           p.id === propertyId ? { ...p, isSaved: newSavedState } : p,
         ),
       );
 
-      // Persist to SQLite
+      // Persist to backend API
       try {
         if (newSavedState) {
-          await saveProperty(user.id, propertyId);
+          await saveProperty(propertyId);
         } else {
-          await unsaveProperty(user.id, propertyId);
+          await unsaveProperty(propertyId);
         }
       } catch (error) {
         console.error('Error toggling save:', error);
@@ -287,7 +293,7 @@ export default function HomeScreen() {
         );
       }
     },
-    [properties, user?.id],
+    [properties, user],
   );
 
   const handleComment = useCallback((property: Property) => {

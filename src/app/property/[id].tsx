@@ -14,11 +14,13 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
 import {
+    getLikeStatus,
+    getSaveStatus,
     likeProperty,
     saveProperty,
     unlikeProperty,
     unsaveProperty,
-} from '@/database/propertyRepository';
+} from '@/services/engagementService';
 import { deleteProperty, getPropertyById } from '@/services/propertyService';
 import { Property } from '@/types/property';
 
@@ -51,6 +53,20 @@ export default function PropertyDetailsScreen() {
         if (isMounted) {
           if (found) {
             setProperty(found);
+            if (user) {
+              try {
+                const [likeRes, saveRes] = await Promise.all([
+                  getLikeStatus(propertyId),
+                  getSaveStatus(propertyId),
+                ]);
+                if (isMounted) {
+                  setHasLiked(likeRes.isLiked);
+                  setHasSaved(saveRes.isSaved);
+                }
+              } catch {
+                // Ignore status query errors, use property defaults
+              }
+            }
           } else {
             const fallback =
               mockProperties.find((item) => item.id === propertyId) ?? null;
@@ -76,7 +92,7 @@ export default function PropertyDetailsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [propertyId]);
+  }, [propertyId, user]);
 
   const handleContactAgent = () => {
     Alert.alert(
@@ -86,16 +102,20 @@ export default function PropertyDetailsScreen() {
   };
 
   const handleToggleLike = async () => {
-    if (!user?.id || !property) return;
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to like properties.');
+      return;
+    }
+    if (!property) return;
 
     const newLikedState = !isLiked;
     setHasLiked(newLikedState);
 
     try {
       if (newLikedState) {
-        await likeProperty(user.id, property.id);
+        await likeProperty(property.id);
       } else {
-        await unlikeProperty(user.id, property.id);
+        await unlikeProperty(property.id);
       }
     } catch (error) {
       console.error('Error toggling like:', error);
@@ -104,16 +124,20 @@ export default function PropertyDetailsScreen() {
   };
 
   const handleToggleSave = async () => {
-    if (!user?.id || !property) return;
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to save properties.');
+      return;
+    }
+    if (!property) return;
 
     const newSavedState = !isSaved;
     setHasSaved(newSavedState);
 
     try {
       if (newSavedState) {
-        await saveProperty(user.id, property.id);
+        await saveProperty(property.id);
       } else {
-        await unsaveProperty(user.id, property.id);
+        await unsaveProperty(property.id);
       }
     } catch (error) {
       console.error('Error toggling save:', error);

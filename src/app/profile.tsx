@@ -17,12 +17,14 @@ import {
     getLikedProperties,
     getPropertiesByUserEmail,
     getPropertiesByUserId,
-    getSavedProperties,
+    getSavedProperties as getSqliteSavedProperties,
     likeProperty,
     saveProperty,
     unlikeProperty,
     unsaveProperty,
 } from '@/database/propertyRepository';
+import { getSavedProperties } from '@/services/engagementService';
+import { getUserProperties } from '@/services/propertyService';
 import { getUserById, UserRow } from '@/database/userRepository';
 import { Property } from '@/types/property';
 
@@ -98,17 +100,40 @@ export default function ProfileScreen() {
       }
 
       try {
-        const posts = user.id
-          ? await getPropertiesByUserId(user.id)
-          : await getPropertiesByUserEmail(user.email, user.id);
+        let posts: Property[] = [];
+        try {
+          posts = user.id ? await getUserProperties(user.id) : [];
+        } catch {
+          posts = user.id
+            ? await getPropertiesByUserId(user.id)
+            : await getPropertiesByUserEmail(user.email, user.id);
+        }
+
+        if (posts.length === 0 && user.id) {
+          try {
+            posts = await getPropertiesByUserId(user.id);
+          } catch {}
+        }
+
         setViewedUser(null);
         setUserPosts(posts);
 
-        // Load liked and saved properties
+        // Load liked and saved properties from backend with SQLite fallback
         if (user.id) {
           const liked = await getLikedProperties(user.id);
-          const saved = await getSavedProperties(user.id);
           setLikedProperties(liked);
+
+          let saved: Property[] = [];
+          try {
+            saved = await getSavedProperties();
+          } catch {
+            saved = await getSqliteSavedProperties(user.id);
+          }
+          if (saved.length === 0) {
+            try {
+              saved = await getSqliteSavedProperties(user.id);
+            } catch {}
+          }
           setSavedProperties(saved);
         }
       } catch {
