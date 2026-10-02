@@ -14,12 +14,12 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
 import {
-    getPropertyById,
     likeProperty,
     saveProperty,
     unlikeProperty,
     unsaveProperty,
 } from '@/database/propertyRepository';
+import { deleteProperty, getPropertyById } from '@/services/propertyService';
 import { Property } from '@/types/property';
 
 export default function PropertyDetailsScreen() {
@@ -27,15 +27,8 @@ export default function PropertyDetailsScreen() {
   const { user } = useAuth();
   const propertyId = Array.isArray(id) ? id[0] : id;
 
-  const mockProperty = useMemo(
-    () => mockProperties.find((item) => item.id === propertyId) ?? null,
-    [propertyId],
-  );
-
-  const [userProperty, setUserProperty] = useState<Property | null>(null);
-  const [isLoadingUserProperty, setIsLoadingUserProperty] = useState(!mockProperty);
-
-  const property = mockProperty ?? userProperty;
+  const [property, setProperty] = useState<Property | null>(null);
+  const [isLoadingProperty, setIsLoadingProperty] = useState(true);
 
   const [hasLiked, setHasLiked] = useState<boolean | null>(null);
   const [hasSaved, setHasSaved] = useState<boolean | null>(null);
@@ -44,24 +37,36 @@ export default function PropertyDetailsScreen() {
   const isSaved = hasSaved ?? property?.isSaved ?? false;
 
   useEffect(() => {
-    if (mockProperty) {
-      return;
-    }
-
     let isMounted = true;
+
     const fetchProperty = async () => {
+      if (!propertyId) {
+        setIsLoadingProperty(false);
+        return;
+      }
+
+      setIsLoadingProperty(true);
       try {
-        const found = await getPropertyById(propertyId ?? '', user?.id);
+        const found = await getPropertyById(propertyId);
         if (isMounted) {
-          setUserProperty(found);
+          if (found) {
+            setProperty(found);
+          } else {
+            const fallback =
+              mockProperties.find((item) => item.id === propertyId) ?? null;
+            setProperty(fallback);
+          }
         }
-      } catch {
+      } catch (err) {
+        console.warn('Error fetching property from backend:', err);
         if (isMounted) {
-          setUserProperty(null);
+          const fallback =
+            mockProperties.find((item) => item.id === propertyId) ?? null;
+          setProperty(fallback);
         }
       } finally {
         if (isMounted) {
-          setIsLoadingUserProperty(false);
+          setIsLoadingProperty(false);
         }
       }
     };
@@ -71,7 +76,7 @@ export default function PropertyDetailsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [mockProperty, propertyId, user?.id]);
+  }, [propertyId]);
 
   const handleContactAgent = () => {
     Alert.alert(
@@ -116,7 +121,41 @@ export default function PropertyDetailsScreen() {
     }
   };
 
-  if (isLoadingUserProperty) {
+  const isOwner = Boolean(
+    user &&
+      property &&
+      (property.createdBy === user.email || property.agentName === user.name)
+  );
+
+  const handleDeleteProperty = () => {
+    if (!property) return;
+
+    Alert.alert(
+      'Delete Property',
+      'Are you sure you want to permanently delete this listing?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteProperty(property.id);
+              Alert.alert('Deleted', 'Property has been successfully deleted.');
+              router.replace('/home');
+            } catch (err: any) {
+              Alert.alert(
+                'Delete Failed',
+                err?.message || 'Unable to delete property. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  if (isLoadingProperty) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#111827" />
@@ -189,6 +228,27 @@ export default function PropertyDetailsScreen() {
               </Text>
             </Pressable>
           </View>
+
+          {isOwner && (
+            <View style={styles.ownerActionsRow}>
+              <Pressable
+                style={[styles.ownerButton, styles.editButton]}
+                onPress={() =>
+                  router.push({
+                    pathname: '/create-property',
+                    params: { id: property.id },
+                  })
+                }>
+                <Text style={styles.editButtonText}>✏️ Edit Listing</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.ownerButton, styles.deleteButton]}
+                onPress={handleDeleteProperty}>
+                <Text style={styles.deleteButtonText}>🗑️ Delete Listing</Text>
+              </Pressable>
+            </View>
+          )}
 
           <View style={styles.statsGrid}>
             <StatCard label="Type" value={property.propertyType} />
@@ -460,5 +520,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f6f7f9',
+  },
+  ownerActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  ownerButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    paddingVertical: 14,
+  },
+  editButton: {
+    backgroundColor: '#111827',
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  deleteButton: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  deleteButtonText: {
+    color: '#dc2626',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

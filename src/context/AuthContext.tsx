@@ -11,15 +11,11 @@ import { initDatabase } from '@/database/database';
 import { migrateFromAsyncStorage } from '@/database/migration';
 import {
   clearActiveSession,
-  createUser,
   findOrCreateGoogleUser,
-  findUserByEmail,
-  findUserForAuth,
-  getActiveSessionUser,
   GoogleUserPayload,
   setActiveSession,
-  UserRow,
 } from '@/database/userRepository';
+import { apiClient, getToken, removeToken, setToken } from '@/services/api';
 
 export type AuthUser = {
   id: number;
@@ -42,14 +38,14 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function toAuthUser(row: UserRow): AuthUser {
+function toAuthUser(row: any): AuthUser {
   return {
-    id: row.id,
+    id: Number(row.id),
     name: row.name,
     email: row.email,
-    bio: row.bio,
-    profileImage: row.profileImage,
-    createdAt: row.createdAt,
+    bio: row.bio ?? null,
+    profileImage: row.profile_image ?? row.profileImage ?? null,
+    createdAt: row.created_at ?? row.createdAt,
   };
 }
 
@@ -65,9 +61,33 @@ export function AuthProvider({ children }: PropsWithChildren) {
         await initDatabase();
         await migrateFromAsyncStorage();
 
-        const activeUser = await getActiveSessionUser();
-        if (isMounted && activeUser) {
-          setUser(toAuthUser(activeUser));
+        const token = await getToken();
+        if (token) {
+          try {
+            const data = await apiClient.get<{ user: any }>('/api/auth/me');
+            if (isMounted && data?.user) {
+              const authUser = toAuthUser(data.user);
+              setUser(authUser);
+              try {
+                await setActiveSession(authUser.id);
+              } catch (e) {
+                // SQLite sync fallback
+              }
+            }
+          } catch (apiErr) {
+            console.warn('Stored token invalid or expired. Clearing token.', apiErr);
+            await removeToken();
+            try {
+              await clearActiveSession();
+            } catch (e) {}
+            if (isMounted) {
+              setUser(null);
+            }
+          }
+        } else {
+          if (isMounted) {
+            setUser(null);
+          }
         }
       } catch (err) {
         console.warn('Error during auth initialization:', err);
@@ -86,29 +106,51 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const userRow = await findUserForAuth(email, password);
-
-    if (!userRow) {
-      const existingUser = await findUserByEmail(email);
-      if (!existingUser) {
-        throw new Error('No registered user found.');
-      }
-      throw new Error('Invalid email or password.');
-    }
-
-    await setActiveSession(userRow.id);
-    setUser(toAuthUser(userRow));
-  };
-
-  const register = async (name: string, email: string, password: string) => {
-    const createdUser = await createUser({
-      name,
-      email,
+    const data = await apiClient.post<{
+      message: string;
+      token: string;
+      user: any;
+    }>('/api/auth/login', {
+      email: email.trim().toLowerCase(),
       password,
     });
 
-    await setActiveSession(createdUser.id);
-    setUser(toAuthUser(createdUser));
+    if (data.token) {
+      await setToken(data.token);
+    }
+
+    const authUser = toAuthUser(data.user);
+    setUser(authUser);
+
+    try {
+      await setActiveSession(authUser.id);
+    } catch (e) {
+      // Ignore SQLite sync error
+    }
+  };
+
+  const register = async (name: string, email: string, password: string) => {
+    const data = await apiClient.post<{
+      message: string;
+      user: any;
+      token?: string;
+    }>('/api/auth/register', {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+    });
+
+    if (data.token) {
+      await setToken(data.token);
+      const authUser = toAuthUser(data.user);
+      setUser(authUser);
+      try {
+        await setActiveSession(authUser.id);
+      } catch (e) {}
+    } else {
+      // Backend /api/auth/register creates account; log in to retrieve JWT session
+      await login(email, password);
+    }
   };
 
   const loginWithGoogle = async (googleUser: GoogleUserPayload) => {
@@ -118,7 +160,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const logout = async () => {
-    await clearActiveSession();
+    await removeToken();
+    try {
+      await clearActiveSession();
+    } catch (e) {}
     setUser(null);
   };
 

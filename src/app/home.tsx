@@ -22,13 +22,13 @@ import { PropertyReelCard } from '@/components/PropertyReelCard';
 import { useAuth } from '@/context/AuthContext';
 import { mockProperties } from '@/data/properties';
 import {
-    getAllProperties,
     likeProperty,
     saveProperty,
     unlikeProperty,
     unsaveProperty,
 } from '@/database/propertyRepository';
 import { findUserByEmail } from '@/database/userRepository';
+import { getProperties } from '@/services/propertyService';
 import { Property } from '@/types/property';
 
 type BedroomFilter = 'Any' | '1' | '2' | '3' | '4+';
@@ -84,58 +84,53 @@ export default function HomeScreen() {
   const { height } = useWindowDimensions();
   const [properties, setProperties] = useState<Property[]>(mockProperties);
   const [isFeedLoading, setIsFeedLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
+  const loadProperties = useCallback(async () => {
+    try {
+      const apiProperties = await getProperties();
+
+      setProperties((currentProperties) => {
+        const likedSavedById = new Map(
+          currentProperties.map((property) => [
+            property.id,
+            { isLiked: property.isLiked, isSaved: property.isSaved },
+          ]),
+        );
+
+        const propertiesToDisplay =
+          apiProperties.length > 0 ? apiProperties : mockProperties;
+
+        return propertiesToDisplay.map((property) => {
+          const previous = likedSavedById.get(property.id);
+          return previous
+            ? { ...property, isLiked: previous.isLiked, isSaved: previous.isSaved }
+            : property;
+        });
+      });
+    } catch (error) {
+      console.warn('Error fetching properties from backend API:', error);
+      setProperties((current) => (current.length > 0 ? current : mockProperties));
+    } finally {
+      setIsFeedLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      let isActive = true;
-
-      void (async () => {
-        try {
-          const sqliteProperties = await getAllProperties(user?.id);
-          if (!isActive) {
-            return;
-          }
-
-          setProperties((currentProperties) => {
-            const likedSavedById = new Map(
-              currentProperties.map((property) => [
-                property.id,
-                { isLiked: property.isLiked, isSaved: property.isSaved },
-              ]),
-            );
-            const sqliteIds = new Set(sqliteProperties.map((property) => property.id));
-            const uniqueMockProperties = mockProperties.filter(
-              (property) => !sqliteIds.has(property.id),
-            );
-            const combinedProperties = [...sqliteProperties, ...uniqueMockProperties];
-
-            return combinedProperties.map((property) => {
-              const previous = likedSavedById.get(property.id);
-              return previous
-                ? { ...property, isLiked: previous.isLiked, isSaved: previous.isSaved }
-                : property;
-            });
-          });
-        } catch {
-          if (isActive) {
-            setProperties(mockProperties);
-          }
-        } finally {
-          if (isActive) {
-            setIsFeedLoading(false);
-          }
-        }
-      })();
-
-      return () => {
-        isActive = false;
-      };
-    }, [user?.id]),
+      void loadProperties();
+    }, [loadProperties]),
   );
+
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    void loadProperties();
+  }, [loadProperties]);
 
   const propertyTypeOptions = useMemo(
     () => [
@@ -409,6 +404,8 @@ export default function HomeScreen() {
           maxToRenderPerBatch={2}
           windowSize={3}
           removeClippedSubviews
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
         />
       ) : (
         <View style={styles.emptyState}>

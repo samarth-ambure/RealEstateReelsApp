@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,8 +15,11 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
-import { createProperty } from '@/database/propertyRepository';
-import { Property } from '@/types/property';
+import {
+  createProperty,
+  getPropertyById,
+  updateProperty,
+} from '@/services/propertyService';
 
 type PropertyFormState = {
   title: string;
@@ -82,11 +85,55 @@ function formatAreaString(input: string): string {
 
 export default function CreatePropertyScreen() {
   const { user } = useAuth();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const propertyId = Array.isArray(id) ? id[0] : id;
+  const isEditing = Boolean(propertyId);
+
   const [form, setForm] = useState<PropertyFormState>(INITIAL_FORM);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingExisting, setIsLoadingExisting] = useState(isEditing);
   const [hasImageError, setHasImageError] = useState(false);
   const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!propertyId) return;
+
+    let isMounted = true;
+    const fetchExisting = async () => {
+      try {
+        const existing = await getPropertyById(propertyId);
+        if (isMounted && existing) {
+          const rawPrice = existing.price.replace(/[^0-9]/g, '');
+          const rawArea = existing.area.replace(/[^0-9]/g, '');
+
+          setForm({
+            title: existing.title,
+            price: rawPrice ? `$${Number(rawPrice).toLocaleString()}` : existing.price,
+            location: existing.location,
+            propertyType: existing.propertyType || 'Apartment',
+            bedrooms: String(existing.bedrooms),
+            bathrooms: String(existing.bathrooms),
+            area: rawArea,
+            description: existing.description,
+            imageUrl: existing.image,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load property for editing:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingExisting(false);
+        }
+      }
+    };
+
+    fetchExisting();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [propertyId]);
 
   const updateField = (field: keyof PropertyFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -175,32 +222,46 @@ export default function CreatePropertyScreen() {
     setIsSubmitting(true);
 
     try {
-      const generatedId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      const newProperty: Property = {
-        id: generatedId,
-        title: form.title.trim(),
-        price: formatPriceString(form.price),
-        location: form.location.trim(),
-        propertyType: form.propertyType.trim(),
-        bedrooms: parseInt(form.bedrooms, 10),
-        bathrooms: parseInt(form.bathrooms, 10),
-        area: formatAreaString(form.area),
-        description: form.description.trim(),
-        image: form.imageUrl.trim(),
-        agentName: user?.name?.trim() || 'Owner',
-        agentImage:
-          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=240&q=80',
-        isLiked: false,
-        isSaved: false,
-        createdBy: user?.email,
-      };
+      const numericPrice = Number(form.price.replace(/[^0-9]/g, ''));
+      const numericArea = Number(form.area.replace(/[^0-9]/g, ''));
 
-      await createProperty(newProperty, user?.id);
-      router.back();
-    } catch {
-      const message = 'Failed to publish property. Please try again.';
+      if (isEditing && propertyId) {
+        await updateProperty(propertyId, {
+          title: form.title.trim(),
+          price: numericPrice,
+          location: form.location.trim(),
+          propertyType: form.propertyType.trim(),
+          bedrooms: parseInt(form.bedrooms, 10),
+          bathrooms: parseInt(form.bathrooms, 10),
+          area: numericArea,
+          description: form.description.trim(),
+          image: form.imageUrl.trim(),
+        });
+        Alert.alert('Success', 'Property updated successfully!');
+        router.back();
+      } else {
+        await createProperty({
+          title: form.title.trim(),
+          price: numericPrice,
+          location: form.location.trim(),
+          propertyType: form.propertyType.trim(),
+          bedrooms: parseInt(form.bedrooms, 10),
+          bathrooms: parseInt(form.bathrooms, 10),
+          area: numericArea,
+          description: form.description.trim(),
+          image: form.imageUrl.trim(),
+          agentName: user?.name?.trim() || 'Owner',
+          agentImage: user?.profileImage || undefined,
+        });
+        Alert.alert('Success', 'Property published successfully!');
+        router.back();
+      }
+    } catch (err: any) {
+      const message =
+        err?.message ||
+        `Failed to ${isEditing ? 'update' : 'publish'} property. Please try again.`;
       setSubmitErrorMessage(message);
-      Alert.alert('Publish Error', message);
+      Alert.alert(isEditing ? 'Update Error' : 'Publish Error', message);
     } finally {
       setIsSubmitting(false);
     }
@@ -226,16 +287,26 @@ export default function CreatePropertyScreen() {
             <Text style={styles.backIcon}>‹</Text>
           </Pressable>
 
-          <Text style={styles.screenTitle}>Create Property</Text>
+          <Text style={styles.screenTitle}>
+            {isEditing ? 'Edit Property' : 'Create Property'}
+          </Text>
 
           <View style={styles.headerRightSpacer} />
         </View>
 
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
+        {isLoadingExisting ? (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator size="large" color="#111827" />
+            <Text style={{ marginTop: 12, color: '#6b7280', fontSize: 14, fontWeight: '600' }}>
+              Loading listing details...
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
           {submitErrorMessage ? (
             <View style={styles.errorBanner}>
               <Text style={styles.errorBannerText}>{submitErrorMessage}</Text>
@@ -465,10 +536,10 @@ export default function CreatePropertyScreen() {
             </View>
           </View>
 
-          {/* Publish Button */}
+          {/* Publish / Update Button */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Publish Property"
+            accessibilityLabel={isEditing ? 'Update Property' : 'Publish Property'}
             style={[
               styles.publishButton,
               isSubmitting && styles.publishButtonDisabled,
@@ -478,13 +549,18 @@ export default function CreatePropertyScreen() {
             {isSubmitting ? (
               <View style={styles.submittingRow}>
                 <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.publishButtonText}>Publishing...</Text>
+                <Text style={styles.publishButtonText}>
+                  {isEditing ? 'Updating...' : 'Publishing...'}
+                </Text>
               </View>
             ) : (
-              <Text style={styles.publishButtonText}>Publish Property</Text>
+              <Text style={styles.publishButtonText}>
+                {isEditing ? 'Update Property' : 'Publish Property'}
+              </Text>
             )}
           </Pressable>
         </ScrollView>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
