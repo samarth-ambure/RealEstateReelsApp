@@ -27,7 +27,6 @@ import {
     unlikeProperty,
     unsaveProperty,
 } from '@/services/engagementService';
-import { findUserByEmail } from '@/database/userRepository';
 import { getProperties } from '@/services/propertyService';
 import { notificationService } from '@/services/notificationService';
 import { Property } from '@/types/property';
@@ -334,20 +333,14 @@ export default function HomeScreen() {
     });
   }, []);
 
-  const handleOpenCreator = useCallback(async (property: Property) => {
-    if (property.createdBy) {
-      try {
-        const creator = await findUserByEmail(property.createdBy);
-        if (creator) {
-          router.push({
-            pathname: '/profile',
-            params: { userId: String(creator.id) },
-          });
-          return;
-        }
-      } catch {
-        // Fall through to display-only creator profile.
-      }
+  const handleOpenCreator = useCallback((property: Property) => {
+    const creatorId = property.userId || property.creator?.id;
+    if (creatorId) {
+      router.push({
+        pathname: '/profile',
+        params: { userId: String(creatorId) },
+      });
+      return;
     }
 
     router.push({

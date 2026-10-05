@@ -18,20 +18,14 @@ import {
 
 import { useAuth } from '@/context/AuthContext';
 import { useThemeContext } from '@/context/ThemeContext';
-import { mockProperties } from '@/data/properties';
 import {
-  getLikedProperties,
-  getPropertiesByUserEmail,
-  getPropertiesByUserId,
-  getSavedProperties as getSqliteSavedProperties,
+  getSavedProperties,
   likeProperty,
   saveProperty,
   unlikeProperty,
   unsaveProperty,
-} from '@/database/propertyRepository';
-import { getSavedProperties } from '@/services/engagementService';
+} from '@/services/engagementService';
 import { getUserProperties } from '@/services/propertyService';
-import { getUserById as getSqliteUserById, UserRow } from '@/database/userRepository';
 import { notificationService } from '@/services/notificationService';
 import { userService, UserStats, UserProfile } from '@/services/userService';
 import { Property } from '@/types/property';
@@ -88,7 +82,7 @@ export default function ProfileScreen() {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  const [viewedUser, setViewedUser] = useState<UserProfile | UserRow | null>(null);
+  const [viewedUser, setViewedUser] = useState<UserProfile | null>(null);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [userPosts, setUserPosts] = useState<Property[]>([]);
   const [likedProperties, setLikedProperties] = useState<Property[]>([]);
@@ -141,44 +135,28 @@ export default function ProfileScreen() {
             }
           }
         } catch (apiErr) {
-          console.warn('Failed to fetch backend profile stats, falling back to local counts:', apiErr);
+          console.warn('Failed to fetch backend profile stats:', apiErr);
         }
 
         let posts: Property[] = [];
         try {
           posts = user.id ? await getUserProperties(user.id) : [];
-        } catch {
-          posts = user.id
-            ? await getPropertiesByUserId(user.id)
-            : await getPropertiesByUserEmail(user.email, user.id);
-        }
-
-        if (posts.length === 0 && user.id) {
-          try {
-            posts = await getPropertiesByUserId(user.id);
-          } catch {}
+        } catch (postsErr) {
+          console.warn('Failed to fetch user properties:', postsErr);
         }
 
         setViewedUser(null);
         setUserPosts(posts);
 
-        // Load liked and saved properties from backend with SQLite fallback
+        // Load saved properties from backend
         if (user.id) {
-          const liked = await getLikedProperties(user.id);
-          setLikedProperties(liked);
-
-          let saved: Property[] = [];
           try {
-            saved = await getSavedProperties();
-          } catch {
-            saved = await getSqliteSavedProperties(user.id);
+            const saved = await getSavedProperties();
+            setSavedProperties(saved);
+          } catch (savedErr) {
+            console.warn('Failed to fetch saved properties:', savedErr);
+            setSavedProperties([]);
           }
-          if (saved.length === 0) {
-            try {
-              saved = await getSqliteSavedProperties(user.id);
-            } catch {}
-          }
-          setSavedProperties(saved);
         }
       } catch {
         setUserPosts([]);
@@ -190,7 +168,7 @@ export default function ProfileScreen() {
 
     if (Number.isFinite(parsedUserId)) {
       try {
-        let otherUser: UserProfile | UserRow | null = null;
+        let otherUser: UserProfile | null = null;
         try {
           const profileRes = await userService.getUserById(parsedUserId);
           if (profileRes?.user) {
@@ -200,11 +178,7 @@ export default function ProfileScreen() {
             }
           }
         } catch (userApiErr) {
-          console.warn('Failed to fetch user by id from API, falling back to local:', userApiErr);
-        }
-
-        if (!otherUser) {
-          otherUser = await getSqliteUserById(parsedUserId);
+          console.warn('Failed to fetch user by id from API:', userApiErr);
         }
 
         setViewedUser(otherUser);
@@ -212,8 +186,8 @@ export default function ProfileScreen() {
         let posts: Property[] = [];
         try {
           posts = await getUserProperties(parsedUserId);
-        } catch {
-          posts = otherUser ? await getPropertiesByUserId(otherUser.id) : [];
+        } catch (postsErr) {
+          console.warn('Failed to fetch other user properties:', postsErr);
         }
         setUserPosts(posts);
         setLikedProperties([]);
@@ -230,11 +204,7 @@ export default function ProfileScreen() {
 
     setViewedUser(null);
     setUserStats(null);
-    setUserPosts(
-      displayName
-        ? mockProperties.filter((property) => property.agentName === displayName)
-        : [],
-    );
+    setUserPosts([]);
     setLikedProperties([]);
     setSavedProperties([]);
   }, [displayName, isOwnProfile, parsedUserId, user, updateUser]);
@@ -356,7 +326,7 @@ export default function ProfileScreen() {
 
     try {
       if (likedProperties.some((p) => p.id === propertyId)) {
-        await unlikeProperty(user.id, propertyId);
+        await unlikeProperty(propertyId);
         setLikedProperties((prev) => prev.filter((p) => p.id !== propertyId));
         setUserStats((prev) =>
           prev
@@ -367,7 +337,7 @@ export default function ProfileScreen() {
             : prev,
         );
       } else {
-        await likeProperty(user.id, propertyId);
+        await likeProperty(propertyId);
         // Add to liked properties
         const property = [...userPosts, ...savedProperties].find(
           (p) => p.id === propertyId,
@@ -394,7 +364,7 @@ export default function ProfileScreen() {
 
     try {
       if (savedProperties.some((p) => p.id === propertyId)) {
-        await unsaveProperty(user.id, propertyId);
+        await unsaveProperty(propertyId);
         setSavedProperties((prev) => prev.filter((p) => p.id !== propertyId));
         setUserStats((prev) =>
           prev
@@ -405,7 +375,7 @@ export default function ProfileScreen() {
             : prev,
         );
       } else {
-        await saveProperty(user.id, propertyId);
+        await saveProperty(propertyId);
         // Add to saved properties
         const property = [...userPosts, ...likedProperties].find(
           (p) => p.id === propertyId,

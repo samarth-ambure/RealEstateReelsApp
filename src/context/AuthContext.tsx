@@ -7,16 +7,16 @@ import {
   useState,
 } from 'react';
 
-import { initDatabase } from '@/database/database';
-import { migrateFromAsyncStorage } from '@/database/migration';
-import {
-  clearActiveSession,
-  findOrCreateGoogleUser,
-  GoogleUserPayload,
-  setActiveSession,
-} from '@/database/userRepository';
 import { apiClient, getToken, removeToken, setToken } from '@/services/api';
 import { disconnectSocket } from '@/services/socketService';
+
+export type GoogleUserPayload = {
+  id?: string | null;
+  name?: string | null;
+  email: string;
+  photoUrl?: string | null;
+  photo?: string | null;
+};
 
 export type AuthUser = {
   id: number;
@@ -61,9 +61,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const bootstrapAuth = async () => {
       try {
-        await initDatabase();
-        await migrateFromAsyncStorage();
-
         const token = await getToken();
         if (token) {
           try {
@@ -71,18 +68,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
             if (isMounted && data?.user) {
               const authUser = toAuthUser(data.user);
               setUser(authUser);
-              try {
-                await setActiveSession(authUser.id);
-              } catch (e) {
-                // SQLite sync fallback
-              }
             }
           } catch (apiErr) {
             console.warn('Stored token invalid or expired. Clearing token.', apiErr);
             await removeToken();
-            try {
-              await clearActiveSession();
-            } catch (e) {}
             if (isMounted) {
               setUser(null);
             }
@@ -124,12 +113,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const authUser = toAuthUser(data.user);
     setUser(authUser);
-
-    try {
-      await setActiveSession(authUser.id);
-    } catch (e) {
-      // Ignore SQLite sync error
-    }
   };
 
   const register = async (name: string, email: string, password: string) => {
@@ -147,9 +130,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
       await setToken(data.token);
       const authUser = toAuthUser(data.user);
       setUser(authUser);
-      try {
-        await setActiveSession(authUser.id);
-      } catch (e) {}
     } else {
       // Backend /api/auth/register creates account; log in to retrieve JWT session
       await login(email, password);
@@ -157,17 +137,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const loginWithGoogle = async (googleUser: GoogleUserPayload) => {
-    const userRow = await findOrCreateGoogleUser(googleUser);
-    await setActiveSession(userRow.id);
-    setUser(toAuthUser(userRow));
+    setUser({
+      id: Number(googleUser.id) || Date.now(),
+      name: googleUser.name || googleUser.email.split('@')[0],
+      email: googleUser.email,
+      profileImage: googleUser.photoUrl ?? googleUser.photo ?? null,
+    });
   };
 
   const logout = async () => {
     disconnectSocket();
     await removeToken();
-    try {
-      await clearActiveSession();
-    } catch (e) {}
     setUser(null);
   };
 
