@@ -32,6 +32,7 @@ import {
 import { getSavedProperties } from '@/services/engagementService';
 import { getUserProperties } from '@/services/propertyService';
 import { getUserById as getSqliteUserById, UserRow } from '@/database/userRepository';
+import { notificationService } from '@/services/notificationService';
 import { userService, UserStats, UserProfile } from '@/services/userService';
 import { Property } from '@/types/property';
 
@@ -95,6 +96,7 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
 
   // Edit profile modal state
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
@@ -237,20 +239,30 @@ export default function ProfileScreen() {
     setSavedProperties([]);
   }, [displayName, isOwnProfile, parsedUserId, user, updateUser]);
 
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const data = await notificationService.getUnreadCount();
+      setUnreadNotificationCount(data.unreadCount ?? data.unread_count ?? 0);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [loadProfile]),
+      loadUnreadCount();
+    }, [loadProfile, loadUnreadCount]),
   );
 
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await loadProfile();
+      await Promise.all([loadProfile(), loadUnreadCount()]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadProfile]);
+  }, [loadProfile, loadUnreadCount]);
 
   const profile = useMemo(() => {
     const name = isOwnProfile
@@ -449,6 +461,19 @@ export default function ProfileScreen() {
 
           {isOwnProfile ? (
             <View style={styles.topBarActions}>
+              <Pressable
+                style={styles.notificationButton}
+                onPress={() => router.push('/notifications' as any)}
+                accessibilityLabel="Notifications">
+                <Text style={styles.notificationButtonText}>🔔</Text>
+                {unreadNotificationCount > 0 ? (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>
+                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
               <Pressable
                 style={styles.themeButton}
                 onPress={handleThemeToggle}
@@ -826,7 +851,41 @@ const styles = StyleSheet.create({
   },
   topBarActions: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  notificationButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    position: 'relative',
+  },
+  notificationButtonText: {
+    fontSize: 16,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '900',
   },
   themeButton: {
     width: 36,

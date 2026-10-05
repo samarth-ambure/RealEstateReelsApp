@@ -82,6 +82,13 @@ function ThemedRootNavigator() {
               headerShown: false,
             }}
           />
+
+          <Stack.Screen
+            name="notifications"
+            options={{
+              headerShown: false,
+            }}
+          />
         </Stack.Protected>
       </Stack>
     </View>

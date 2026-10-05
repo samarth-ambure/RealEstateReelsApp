@@ -29,6 +29,7 @@ import {
 } from '@/services/engagementService';
 import { findUserByEmail } from '@/database/userRepository';
 import { getProperties } from '@/services/propertyService';
+import { notificationService } from '@/services/notificationService';
 import { Property } from '@/types/property';
 
 type BedroomFilter = 'Any' | '1' | '2' | '3' | '4+';
@@ -89,6 +90,7 @@ export default function HomeScreen() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
 
   const loadProperties = useCallback(async () => {
     try {
@@ -121,16 +123,27 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const data = await notificationService.getUnreadCount();
+      setUnreadNotificationCount(data.unreadCount ?? data.unread_count ?? 0);
+    } catch {
+      // ignore network errors for badge
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void loadProperties();
-    }, [loadProperties]),
+      void loadUnreadCount();
+    }, [loadProperties, loadUnreadCount]),
   );
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     void loadProperties();
-  }, [loadProperties]);
+    void loadUnreadCount();
+  }, [loadProperties, loadUnreadCount]);
 
   const propertyTypeOptions = useMemo(
     () => [
@@ -216,6 +229,10 @@ export default function HomeScreen() {
 
   const handleOpenMessages = () => {
     router.push('/messages');
+  };
+
+  const handleOpenNotifications = () => {
+    router.push('/notifications' as any);
   };
 
   const handleLike = useCallback(
@@ -482,6 +499,27 @@ export default function HomeScreen() {
               />
             </Pressable>
           )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            style={({ pressed }) => [styles.notificationIconButton, pressed && styles.pressed]}
+            onPress={handleOpenNotifications}>
+            <AppIcon
+              ios="bell.fill"
+              android="notifications"
+              size={18}
+              color="#1e293b"
+              fallback="🔔"
+            />
+            {unreadNotificationCount > 0 ? (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
 
           <Pressable
             accessibilityRole="button"
@@ -770,6 +808,38 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
+  },
+  notificationIconButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '900',
   },
   searchInputWrap: {
     width: 176,
