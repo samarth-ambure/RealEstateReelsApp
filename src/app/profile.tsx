@@ -1,31 +1,38 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
 import { useThemeContext } from '@/context/ThemeContext';
 import { mockProperties } from '@/data/properties';
 import {
-    getLikedProperties,
-    getPropertiesByUserEmail,
-    getPropertiesByUserId,
-    getSavedProperties as getSqliteSavedProperties,
-    likeProperty,
-    saveProperty,
-    unlikeProperty,
-    unsaveProperty,
+  getLikedProperties,
+  getPropertiesByUserEmail,
+  getPropertiesByUserId,
+  getSavedProperties as getSqliteSavedProperties,
+  likeProperty,
+  saveProperty,
+  unlikeProperty,
+  unsaveProperty,
 } from '@/database/propertyRepository';
 import { getSavedProperties } from '@/services/engagementService';
 import { getUserProperties } from '@/services/propertyService';
-import { getUserById, UserRow } from '@/database/userRepository';
+import { getUserById as getSqliteUserById, UserRow } from '@/database/userRepository';
+import { userService, UserStats, UserProfile } from '@/services/userService';
 import { Property } from '@/types/property';
 
 const DEFAULT_BIO = 'Real estate enthusiast';
@@ -60,7 +67,7 @@ function firstParam(value?: string | string[]) {
 }
 
 export default function ProfileScreen() {
-  const { logout, user } = useAuth();
+  const { logout, user, updateUser } = useAuth();
   const params = useLocalSearchParams<{
     userId?: string | string[];
     displayName?: string | string[];
@@ -80,12 +87,21 @@ export default function ProfileScreen() {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  const [viewedUser, setViewedUser] = useState<UserRow | null>(null);
+  const [viewedUser, setViewedUser] = useState<UserProfile | UserRow | null>(null);
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [userPosts, setUserPosts] = useState<Property[]>([]);
   const [likedProperties, setLikedProperties] = useState<Property[]>([]);
   const [savedProperties, setSavedProperties] = useState<Property[]>([]);
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [failedAvatarUri, setFailedAvatarUri] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Edit profile modal state
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editImage, setEditImage] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const loadProfile = useCallback(async () => {
     setFailedAvatarUri(null);
@@ -93,6 +109,7 @@ export default function ProfileScreen() {
     if (isOwnProfile) {
       if (!user) {
         setViewedUser(null);
+        setUserStats(null);
         setUserPosts([]);
         setLikedProperties([]);
         setSavedProperties([]);
@@ -100,6 +117,31 @@ export default function ProfileScreen() {
       }
 
       try {
+        // Fetch live profile details and statistics from backend API
+        try {
+          const profileRes = await userService.getCurrentProfile();
+          if (profileRes?.user) {
+            if (profileRes.stats || profileRes.user.stats) {
+              setUserStats(profileRes.stats || profileRes.user.stats || null);
+            }
+            if (
+              profileRes.user.name !== user.name ||
+              (profileRes.user.bio && profileRes.user.bio !== user.bio) ||
+              (profileRes.user.profile_image &&
+                profileRes.user.profile_image !== user.profileImage)
+            ) {
+              updateUser({
+                name: profileRes.user.name,
+                bio: profileRes.user.bio,
+                profileImage:
+                  profileRes.user.profile_image || profileRes.user.profileImage,
+              });
+            }
+          }
+        } catch (apiErr) {
+          console.warn('Failed to fetch backend profile stats, falling back to local counts:', apiErr);
+        }
+
         let posts: Property[] = [];
         try {
           posts = user.id ? await getUserProperties(user.id) : [];
@@ -146,14 +188,37 @@ export default function ProfileScreen() {
 
     if (Number.isFinite(parsedUserId)) {
       try {
-        const otherUser = await getUserById(parsedUserId);
+        let otherUser: UserProfile | UserRow | null = null;
+        try {
+          const profileRes = await userService.getUserById(parsedUserId);
+          if (profileRes?.user) {
+            otherUser = profileRes.user;
+            if (profileRes.stats || profileRes.user.stats) {
+              setUserStats(profileRes.stats || profileRes.user.stats || null);
+            }
+          }
+        } catch (userApiErr) {
+          console.warn('Failed to fetch user by id from API, falling back to local:', userApiErr);
+        }
+
+        if (!otherUser) {
+          otherUser = await getSqliteUserById(parsedUserId);
+        }
+
         setViewedUser(otherUser);
-        const posts = otherUser ? await getPropertiesByUserId(otherUser.id) : [];
+
+        let posts: Property[] = [];
+        try {
+          posts = await getUserProperties(parsedUserId);
+        } catch {
+          posts = otherUser ? await getPropertiesByUserId(otherUser.id) : [];
+        }
         setUserPosts(posts);
         setLikedProperties([]);
         setSavedProperties([]);
       } catch {
         setViewedUser(null);
+        setUserStats(null);
         setUserPosts([]);
         setLikedProperties([]);
         setSavedProperties([]);
@@ -162,6 +227,7 @@ export default function ProfileScreen() {
     }
 
     setViewedUser(null);
+    setUserStats(null);
     setUserPosts(
       displayName
         ? mockProperties.filter((property) => property.agentName === displayName)
@@ -169,7 +235,7 @@ export default function ProfileScreen() {
     );
     setLikedProperties([]);
     setSavedProperties([]);
-  }, [displayName, isOwnProfile, parsedUserId, user]);
+  }, [displayName, isOwnProfile, parsedUserId, user, updateUser]);
 
   useFocusEffect(
     useCallback(() => {
@@ -177,15 +243,34 @@ export default function ProfileScreen() {
     }, [loadProfile]),
   );
 
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await loadProfile();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadProfile]);
+
   const profile = useMemo(() => {
     const name = isOwnProfile
       ? user?.name || 'RealEstate User'
       : viewedUser?.name || displayName || 'Creator';
     const email = isOwnProfile ? user?.email || 'No email available' : viewedUser?.email;
     const bio = isOwnProfile ? user?.bio || DEFAULT_BIO : viewedUser?.bio?.trim() || '';
-    const photoUri = isOwnProfile
-      ? user?.profileImage
-      : viewedUser?.profileImage || displayImage;
+
+    let photoUri: string | null | undefined = null;
+    if (isOwnProfile) {
+      photoUri = user?.profileImage;
+    } else if (viewedUser) {
+      if ('profile_image' in viewedUser && viewedUser.profile_image) {
+        photoUri = viewedUser.profile_image;
+      } else if (viewedUser.profileImage) {
+        photoUri = viewedUser.profileImage;
+      }
+    } else {
+      photoUri = displayImage;
+    }
 
     return {
       name,
@@ -198,7 +283,44 @@ export default function ProfileScreen() {
   }, [displayImage, displayName, isOwnProfile, user, viewedUser]);
 
   const handleEditProfile = () => {
-    Alert.alert('Edit Profile', 'Edit Profile feature will be available soon.');
+    setEditName(user?.name || '');
+    setEditBio(user?.bio || '');
+    setEditImage(user?.profileImage || '');
+    setIsEditModalVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Validation Error', 'Name cannot be empty.');
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+      const res = await userService.updateProfile({
+        name: editName.trim(),
+        bio: editBio.trim() || null,
+        profile_image: editImage.trim() || null,
+      });
+
+      if (res?.user) {
+        updateUser({
+          name: res.user.name,
+          bio: res.user.bio,
+          profileImage: res.user.profile_image || res.user.profileImage,
+        });
+        if (res.stats || res.user.stats) {
+          setUserStats(res.stats || res.user.stats || null);
+        }
+      }
+      setIsEditModalVisible(false);
+      Alert.alert('Success', 'Profile updated successfully!');
+    } catch (error: any) {
+      console.error('Update profile error:', error);
+      Alert.alert('Error', error?.message || 'Failed to update profile.');
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleCreatePost = () => {
@@ -224,13 +346,31 @@ export default function ProfileScreen() {
       if (likedProperties.some((p) => p.id === propertyId)) {
         await unlikeProperty(user.id, propertyId);
         setLikedProperties((prev) => prev.filter((p) => p.id !== propertyId));
+        setUserStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                liked_properties: Math.max(0, (prev.liked_properties || 1) - 1),
+              }
+            : prev,
+        );
       } else {
         await likeProperty(user.id, propertyId);
         // Add to liked properties
-        const property = [...userPosts, ...savedProperties].find((p) => p.id === propertyId);
+        const property = [...userPosts, ...savedProperties].find(
+          (p) => p.id === propertyId,
+        );
         if (property) {
           setLikedProperties((prev) => [{ ...property, isLiked: true }, ...prev]);
         }
+        setUserStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                liked_properties: (prev.liked_properties || 0) + 1,
+              }
+            : prev,
+        );
       }
     } catch (error) {
       console.error('Error toggling like:', error);
@@ -244,25 +384,58 @@ export default function ProfileScreen() {
       if (savedProperties.some((p) => p.id === propertyId)) {
         await unsaveProperty(user.id, propertyId);
         setSavedProperties((prev) => prev.filter((p) => p.id !== propertyId));
+        setUserStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                saved_properties: Math.max(0, (prev.saved_properties || 1) - 1),
+              }
+            : prev,
+        );
       } else {
         await saveProperty(user.id, propertyId);
         // Add to saved properties
-        const property = [...userPosts, ...likedProperties].find((p) => p.id === propertyId);
+        const property = [...userPosts, ...likedProperties].find(
+          (p) => p.id === propertyId,
+        );
         if (property) {
           setSavedProperties((prev) => [{ ...property, isSaved: true }, ...prev]);
         }
+        setUserStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                saved_properties: (prev.saved_properties || 0) + 1,
+              }
+            : prev,
+        );
       }
     } catch (error) {
       console.error('Error toggling save:', error);
     }
   };
 
+  const postsCount =
+    userStats?.posted_properties ?? userStats?.postedProperties ?? userPosts.length;
+  const likedCount =
+    userStats?.liked_properties ?? userStats?.likedProperties ?? likedProperties.length;
+  const savedCount =
+    userStats?.saved_properties ?? userStats?.savedProperties ?? savedProperties.length;
+
   return (
     <View style={styles.container}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor="#2563eb"
+            colors={['#2563eb']}
+          />
+        }>
         <View style={styles.topBar}>
           <Pressable
             accessibilityRole="button"
@@ -333,24 +506,33 @@ export default function ProfileScreen() {
           <View style={styles.tabsRow}>
             <ProfileTab
               label="Posts"
-              count={userPosts.length}
+              count={postsCount}
               isActive={activeTab === 'posts'}
               onPress={() => setActiveTab('posts')}
             />
             <ProfileTab
               label="Liked"
-              count={likedProperties.length}
+              count={likedCount}
               isActive={activeTab === 'liked'}
               onPress={() => setActiveTab('liked')}
             />
             <ProfileTab
               label="Saved"
-              count={savedProperties.length}
+              count={savedCount}
               isActive={activeTab === 'saved'}
               onPress={() => setActiveTab('saved')}
             />
           </View>
-        ) : null}
+        ) : (
+          <View style={styles.tabsRow}>
+            <ProfileTab
+              label="Listings"
+              count={postsCount}
+              isActive={true}
+              onPress={() => {}}
+            />
+          </View>
+        )}
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -458,6 +640,111 @@ export default function ProfileScreen() {
           })()}
         </View>
       </ScrollView>
+
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={isEditModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => !isSavingProfile && setIsEditModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                disabled={isSavingProfile}
+                style={styles.modalCloseButton}
+                onPress={() => setIsEditModalVisible(false)}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.modalScroll}>
+              <View style={styles.modalAvatarContainer}>
+                {editImage.trim() ? (
+                  <Image source={{ uri: editImage.trim() }} style={styles.modalAvatar} />
+                ) : (
+                  <View style={styles.modalAvatar}>
+                    <Text style={styles.modalAvatarText}>
+                      {getInitials(editName || user?.name)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Full Name</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Your Name"
+                  placeholderTextColor="#9ca3af"
+                  maxLength={100}
+                  editable={!isSavingProfile}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Profile Photo URL</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={editImage}
+                  onChangeText={setEditImage}
+                  placeholder="https://images.unsplash.com/..."
+                  placeholderTextColor="#9ca3af"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!isSavingProfile}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Bio</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  value={editBio}
+                  onChangeText={setEditBio}
+                  placeholder="Write a short bio about yourself..."
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                  numberOfLines={3}
+                  maxLength={300}
+                  editable={!isSavingProfile}
+                />
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                disabled={isSavingProfile}
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setIsEditModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                disabled={isSavingProfile}
+                style={[
+                  styles.modalButton,
+                  styles.modalSaveButton,
+                  isSavingProfile && styles.disabledButton,
+                ]}
+                onPress={handleSaveProfile}>
+                {isSavingProfile ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save Changes</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -806,5 +1093,122 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  modalCloseButton: {
+    padding: 6,
+  },
+  modalCloseText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+  modalScroll: {
+    marginTop: 12,
+  },
+  modalAvatarContainer: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  modalAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#e5e7eb',
+  },
+  modalAvatarText: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '800',
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  textInput: {
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#111827',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelButton: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  modalCancelText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  modalSaveButton: {
+    backgroundColor: '#111827',
+  },
+  modalSaveText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

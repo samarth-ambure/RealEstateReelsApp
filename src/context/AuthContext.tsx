@@ -34,6 +34,8 @@ type AuthContextValue = {
   register: (name: string, email: string, password: string) => Promise<void>;
   loginWithGoogle: (googleUser: GoogleUserPayload) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (data: Partial<AuthUser>) => void;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -167,6 +169,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(null);
   };
 
+  const updateUser = (updated: Partial<AuthUser>) => {
+    setUser((prev) => (prev ? { ...prev, ...updated } : prev));
+  };
+
+  const refreshUser = async () => {
+    try {
+      const data = await apiClient.get<{ user: any }>('/api/users/profile');
+      if (data?.user) {
+        setUser(toAuthUser(data.user));
+      }
+    } catch (e) {
+      console.warn('Failed to refresh user:', e);
+    }
+  };
+
   const value = useMemo(
     () => ({
       user,
@@ -176,6 +193,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       register,
       loginWithGoogle,
       logout,
+      updateUser,
+      refreshUser,
     }),
     [isLoading, user],
   );
