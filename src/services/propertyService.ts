@@ -71,6 +71,8 @@ export function formatBackendProperty(raw: any): Property {
     isLiked: Boolean(raw.isLiked ?? raw.is_liked ?? false),
     isSaved: Boolean(raw.isSaved ?? raw.is_saved ?? false),
     createdBy: raw.creator?.email || raw.userEmail || undefined,
+    userId: Number(raw.user_id ?? raw.userId ?? raw.creator?.id) || undefined,
+    creator: raw.creator || undefined,
   };
 }
 

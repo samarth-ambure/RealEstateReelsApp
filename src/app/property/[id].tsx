@@ -21,6 +21,7 @@ import {
     unlikeProperty,
     unsaveProperty,
 } from '@/services/engagementService';
+import { chatService } from '@/services/chatService';
 import { deleteProperty, getPropertyById } from '@/services/propertyService';
 import { Property } from '@/types/property';
 
@@ -94,11 +95,31 @@ export default function PropertyDetailsScreen() {
     };
   }, [propertyId, user]);
 
-  const handleContactAgent = () => {
-    Alert.alert(
-      'Contact Agent',
-      'Contact Agent functionality will be available soon.',
-    );
+  const handleContactAgent = async () => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to contact the agent.');
+      return;
+    }
+    const agentUserId = property?.userId || property?.creator?.id;
+    if (!agentUserId) {
+      Alert.alert('Notice', 'Agent contact information is not available for this listing.');
+      return;
+    }
+    if (agentUserId === user.id) {
+      Alert.alert('Notice', 'You are the creator of this listing.');
+      return;
+    }
+
+    try {
+      const conv = await chatService.getOrCreateConversation(agentUserId);
+      router.push({
+        pathname: '/messages',
+        params: { conversationId: String(conv.id) },
+      } as any);
+    } catch (error: any) {
+      console.error('Failed to initiate conversation with agent:', error);
+      Alert.alert('Error', error?.message || 'Could not connect with agent.');
+    }
   };
 
   const handleToggleLike = async () => {

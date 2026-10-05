@@ -14,4 +14,11 @@ export type Property = {
   isLiked: boolean;
   isSaved: boolean;
   createdBy?: string;
+  userId?: number;
+  creator?: {
+    id: number;
+    name: string;
+    email?: string;
+    profile_image?: string;
+  };
 };

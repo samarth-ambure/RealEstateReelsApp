@@ -16,6 +16,7 @@ import {
   setActiveSession,
 } from '@/database/userRepository';
 import { apiClient, getToken, removeToken, setToken } from '@/services/api';
+import { disconnectSocket } from '@/services/socketService';
 
 export type AuthUser = {
   id: number;
@@ -162,6 +163,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const logout = async () => {
+    disconnectSocket();
     await removeToken();
     try {
       await clearActiveSession();
